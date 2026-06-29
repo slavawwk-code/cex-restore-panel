@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m py_compile /Users/vyaceslav/reklamamvp/app/services/validator.py /Users/vyaceslav/reklamamvp/app/services/simulator.py /Users/vyaceslav/reklamamvp/app/handlers/validator.py)"
+    ]
+  }
+}
