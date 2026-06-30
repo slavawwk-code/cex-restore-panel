@@ -1,37 +1,25 @@
 # First VPS Deployment
 
-Target: Ubuntu 24.04 LTS, Python 3.13, SQLite, systemd.
+Target: Ubuntu 24.04 LTS, system Python 3.12, SQLite, systemd.
 
 The first deployment must stay in `DRY_RUN=True` until all Telegram and proxy
 accounts have been checked manually.
 
 ## 1. Prepare Ubuntu
 
-Ubuntu 24.04 ships Python 3.12 as its default interpreter. Install Python 3.13
-without replacing the system Python. The official Python documentation
-recommends `make altinstall` for a parallel source installation.
+Ubuntu 24.04 ships Python 3.12 as its default interpreter. The complete project
+test suite, pinned dependencies, smoke test, and healthcheck are compatible
+with Python 3.12, so no custom Python build or external repository is needed.
 
 ```bash
 sudo apt update
-sudo apt install -y \
-  build-essential pkg-config wget ca-certificates \
-  libssl-dev zlib1g-dev libbz2-dev libreadline-dev \
-  libsqlite3-dev libffi-dev liblzma-dev tk-dev uuid-dev
-
-cd /tmp
-wget https://www.python.org/ftp/python/3.13.14/Python-3.13.14.tgz
-tar -xzf Python-3.13.14.tgz
-cd Python-3.13.14
-./configure --enable-optimizations
-make -j"$(nproc)"
-sudo make altinstall
-python3.13 --version
+sudo apt install -y python3 python3-venv python3-pip git
+python3 --version
 ```
 
-Install Git and create a dedicated service account:
+Create a dedicated service account:
 
 ```bash
-sudo apt install -y git
 sudo useradd --system --create-home \
   --home-dir /opt/cex-restore-panel \
   --shell /usr/sbin/nologin cexrestore

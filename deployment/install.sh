@@ -3,17 +3,17 @@ set -Eeuo pipefail
 umask 077
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PYTHON_BIN="${PYTHON_BIN:-python3.13}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_DIR="${VENV_DIR:-${PROJECT_ROOT}/.venv}"
 
 if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
-  echo "Python 3.13 was not found (${PYTHON_BIN})." >&2
-  echo "Install Python 3.13 first; see DEPLOY.md." >&2
+  echo "System Python was not found (${PYTHON_BIN})." >&2
+  echo "Install Python 3.12 or newer; see DEPLOY.md." >&2
   exit 1
 fi
 
-if ! "${PYTHON_BIN}" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 13) else 1)'; then
-  echo "${PYTHON_BIN} must be Python 3.13." >&2
+if ! "${PYTHON_BIN}" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)'; then
+  echo "${PYTHON_BIN} must be Python 3.12 or newer." >&2
   exit 1
 fi
 

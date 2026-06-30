@@ -34,7 +34,7 @@ Cex Restore Panel is designed to help manage advertising campaigns across multip
 
 ## Technology Stack
 
-- Python 3.13+
+- Python 3.12+
 - aiogram 3 (Telegram bot framework)
 - Telethon (Telegram user account client)
 - SQLite (database)
