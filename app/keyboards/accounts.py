@@ -30,11 +30,7 @@ def get_accounts_list_keyboard(
 
 def get_account_detail_keyboard(account_id: int, status: str, session_connected: bool = False) -> InlineKeyboardMarkup:
     """Keyboard for account detail view."""
-    telegram_callback = (
-        f"auth_check_status_{account_id}"
-        if session_connected
-        else f"auth_connect_{account_id}"
-    )
+    telegram_callback = f"auth_methods_{account_id}"
     buttons = [
         [
             InlineKeyboardButton(text="Telegram", callback_data=telegram_callback),
@@ -75,6 +71,12 @@ def get_account_settings_keyboard(
         buttons.append(
             [InlineKeyboardButton(text="Отключить аккаунт", callback_data=f"account_disable_{account_id}")]
         )
+    buttons.append(
+        [InlineKeyboardButton(text="Повторная авторизация", callback_data=f"lifecycle_reauth_prompt_{account_id}")]
+    )
+    buttons.append(
+        [InlineKeyboardButton(text="Удалить аккаунт", callback_data=f"lifecycle_delete_prompt_{account_id}")]
+    )
     buttons.append(
         [InlineKeyboardButton(text="Назад", callback_data=f"account_detail_{account_id}")]
     )

@@ -1,6 +1,5 @@
 import logging
 import asyncio
-from pathlib import Path
 from datetime import datetime
 from sqlalchemy.orm import Session
 from telethon import TelegramClient
@@ -13,37 +12,30 @@ from telethon.errors import (
     RPCError,
 )
 from app.database.models import AdvertisingAccount
-from app.config import ensure_runtime_directories, load_settings
-from app.telethon.config import get_api_credentials
-from app.telethon.proxy import build_proxy
+from app.services.account_health import update_persisted_health
+from app.services.account_sessions import (
+    create_account_client,
+    resolve_session_source,
+)
 
 logger = logging.getLogger(__name__)
 
 class TelethonAuthError(Exception):
     """Base exception for Telethon auth errors."""
 
-    pass
-
-
-def _get_session_path(account: AdvertisingAccount) -> str:
-    """Get full path to session file."""
-    settings = load_settings(require_secrets=False)
-    ensure_runtime_directories(settings)
-    return str(settings.sessions_dir / account.telethon_session)
+    def __init__(self, message: str, retry_after: int | None = None):
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 def _create_client(account: AdvertisingAccount) -> TelegramClient:
-    """Create a Telethon client with current credentials and account proxy."""
-    api_id, api_hash = get_api_credentials()
-    return TelegramClient(
-        _get_session_path(account),
-        api_id,
-        api_hash,
-        proxy=build_proxy(account),
-        connection_retries=1,
-        request_retries=2,
-        timeout=15,
-    )
+    """Create a client using file → string session priority."""
+    return create_account_client(account)
+
+
+def _create_login_client(account: AdvertisingAccount) -> TelegramClient:
+    """Create a file-backed client for phone-code login."""
+    return create_account_client(account, for_login=True)
 
 
 def _describe_delivery(sent_code) -> str:
@@ -71,7 +63,7 @@ async def send_login_code(account: AdvertisingAccount) -> dict:
 
     client = None
     try:
-        client = _create_client(account)
+        client = _create_login_client(account)
         await asyncio.wait_for(client.connect(), timeout=15)
         if await client.is_user_authorized():
             user = await client.get_me()
@@ -88,7 +80,8 @@ async def send_login_code(account: AdvertisingAccount) -> dict:
             raise TelethonAuthError("Telegram отклонил формат номера телефона")
         except FloodWaitError as e:
             raise TelethonAuthError(
-                f"Слишком много запросов. Повторите через {e.seconds} сек."
+                f"Слишком много запросов. Повторите через {e.seconds} сек.",
+                retry_after=e.seconds,
             )
         except RPCError as e:
             raise TelethonAuthError(
@@ -138,7 +131,7 @@ async def sign_in_with_code(
 
     client = None
     try:
-        client = _create_client(account)
+        client = _create_login_client(account)
         await asyncio.wait_for(client.connect(), timeout=15)
 
         try:
@@ -152,7 +145,8 @@ async def sign_in_with_code(
             raise TelethonAuthError("Срок действия кода истёк. Запросите новый код.")
         except FloodWaitError as e:
             raise TelethonAuthError(
-                f"Слишком много попыток. Повторите через {e.seconds} сек."
+                f"Слишком много попыток. Повторите через {e.seconds} сек.",
+                retry_after=e.seconds,
             )
         except RPCError as e:
             raise TelethonAuthError(
@@ -181,7 +175,7 @@ async def sign_in_with_password(account: AdvertisingAccount, password: str) -> b
 
     client = None
     try:
-        client = _create_client(account)
+        client = _create_login_client(account)
         await asyncio.wait_for(client.connect(), timeout=15)
 
         try:
@@ -212,19 +206,20 @@ async def check_session_status(session: Session, account: AdvertisingAccount) ->
     """
     client = None
     try:
-        session_path = _get_session_path(account)
-
-        # Check if session file exists
-        if not Path(session_path + ".session").is_file():
+        resolution = resolve_session_source(account)
+        if resolution is None:
             account.session_connected = False
             account.session_user_id = None
             account.session_username = None
             account.session_last_checked_at = datetime.utcnow()
+            account.auth_status = "unverified"
+            account.last_auth_error = "Сессия не настроена"
+            update_persisted_health(session, account)
             session.commit()
-            logger.info(f"Session file not found for account {account.id}")
+            logger.info("Session not configured for account %s", account.id)
             return {
                 "connected": False,
-                "reason": "Файл сессии не найден",
+                "reason": "File/StringSession не настроена",
                 "user_id": None,
                 "username": None,
             }
@@ -242,6 +237,10 @@ async def check_session_status(session: Session, account: AdvertisingAccount) ->
             account.session_user_id = str(user.id)
             account.session_username = user.username or f"ID: {user.id}"
             account.session_last_checked_at = datetime.utcnow()
+            account.auth_status = "active"
+            account.last_auth_error = None
+            account.last_error = None
+            update_persisted_health(session, account)
             session.commit()
             logger.info(f"Session verified for account {account.id}: {user.username or user.id}")
             return {
@@ -255,6 +254,9 @@ async def check_session_status(session: Session, account: AdvertisingAccount) ->
             account.session_user_id = None
             account.session_username = None
             account.session_last_checked_at = datetime.utcnow()
+            account.auth_status = "unverified"
+            account.last_auth_error = "Сессия не авторизована"
+            update_persisted_health(session, account)
             session.commit()
             logger.warning(f"Session not authorized for account {account.id}")
             return {
@@ -268,6 +270,12 @@ async def check_session_status(session: Session, account: AdvertisingAccount) ->
         logger.error(f"Error checking session status for account {account.id}: {e}", exc_info=True)
         account.session_connected = False
         account.session_last_checked_at = datetime.utcnow()
+        account.auth_status = (
+            "banned" if "banned" in type(e).__name__.lower() else "error"
+        )
+        account.last_auth_error = f"{type(e).__name__}: проверка сессии не пройдена"
+        account.last_error = account.last_auth_error
+        update_persisted_health(session, account)
         session.commit()
 
         return {
@@ -287,34 +295,40 @@ async def disconnect_session(session: Session, account: AdvertisingAccount, dele
     Update database to mark as disconnected.
     """
     try:
-        session_path = _get_session_path(account)
-
-        # Update database
-        account.session_connected = False
-        account.session_user_id = None
-        account.session_username = None
-        account.session_last_checked_at = datetime.utcnow()
-        session.commit()
+        resolution = resolve_session_source(account)
 
         # Try to disconnect client
         client = None
         try:
-            client = _create_client(account)
-            await client.connect()
-            await client.log_out()
-            logger.info(f"Client logged out for account {account.id}")
+            if resolution is not None:
+                client = _create_client(account)
+                await client.connect()
+                await client.log_out()
+                logger.info(f"Client logged out for account {account.id}")
         except Exception as e:
             logger.warning(f"Error logging out client for account {account.id}: {e}")
         finally:
             if client is not None:
                 await client.disconnect()
 
+        account.session_connected = False
+        account.session_user_id = None
+        account.session_username = None
+        account.session_last_checked_at = datetime.utcnow()
+        account.auth_status = "unverified"
+        account.last_auth_error = None
+        account.string_session = None
+
         # Handle session file
         if delete_file:
-            session_file = session_path + ".session"
-            if Path(session_file).is_file():
-                Path(session_file).unlink()
+            session_file = resolution.file_path if resolution else None
+            if session_file and session_file.is_file():
+                session_file.unlink()
                 logger.info(f"Session file deleted for account {account.id}")
+            account.session_file_path = None
+
+        update_persisted_health(session, account)
+        session.commit()
 
         return True
 

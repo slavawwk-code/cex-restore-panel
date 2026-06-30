@@ -33,7 +33,7 @@ def calculate_account_health(
     account: AdvertisingAccount,
     scheduler_running: bool,
 ) -> AccountHealth:
-    """Calculate a read-only 100-point operational health score."""
+    """Calculate a read-only 100-point Telegram account health score."""
     chats = (
         session.query(Chat)
         .filter(Chat.advertising_account_id == account.id, Chat.is_active.is_(True))
@@ -65,11 +65,23 @@ def calculate_account_health(
 
     telegram_ok = bool(account.session_connected)
     proxy_working = bool(account.proxy_enabled and account.proxy_status == "working")
-    proxy_last_ok = bool(account.proxy_last_check_success is True)
-    account_enabled = account.status != "disabled"
-    templates_ok = bool(template_ids)
-    chats_ok = bool(active_chats)
-    errors_ok = recent_errors == 0
+    session_configured = bool(
+        account.session_file_path
+        or account.string_session
+        or account.telethon_session
+    )
+    session_valid = bool(account.session_connected and session_configured)
+    no_auth_errors = bool(
+        not account.last_auth_error
+        and account.auth_status not in {"banned", "error"}
+    )
+    fully_active = bool(
+        account.status == "active"
+        and (
+            account.auth_status == "active"
+            or (account.auth_status in {None, "unverified"} and telegram_ok)
+        )
+    )
 
     components = (
         HealthComponent(
@@ -90,46 +102,25 @@ def calculate_account_health(
             or ("Прокси отключён" if not account.proxy_enabled else "Нет успешной проверки"),
         ),
         HealthComponent(
-            "Последняя проверка прокси",
-            10 if proxy_last_ok else 0,
-            10,
-            proxy_last_ok,
-            None if proxy_last_ok else account.proxy_last_error or "Нет успешной проверки",
+            "Сессия",
+            20 if session_valid else 0,
+            20,
+            session_valid,
+            None if session_valid else "Нет валидной file/string session",
         ),
         HealthComponent(
-            "Планировщик",
-            15 if scheduler_running else 0,
-            15,
-            scheduler_running,
-            None if scheduler_running else "Планировщик остановлен",
+            "Ошибки авторизации",
+            20 if no_auth_errors else 0,
+            20,
+            no_auth_errors,
+            None if no_auth_errors else account.last_auth_error or "Ошибка авторизации",
         ),
         HealthComponent(
             "Аккаунт",
-            15 if account_enabled else 0,
-            15,
-            account_enabled,
-            None if account_enabled else "Аккаунт отключён",
-        ),
-        HealthComponent(
-            "Шаблоны",
-            10 if templates_ok else 0,
-            10,
-            templates_ok,
-            None if templates_ok else "Не назначены активным чатам",
-        ),
-        HealthComponent(
-            "Чаты",
-            10 if chats_ok else 0,
-            10,
-            chats_ok,
-            None if chats_ok else "Нет активных чатов",
-        ),
-        HealthComponent(
-            "Ошибки отправки",
-            10 if errors_ok else 0,
-            10,
-            errors_ok,
-            None if errors_ok else f"Ошибок за 24 часа: {recent_errors}",
+            30 if fully_active else 0,
+            30,
+            fully_active,
+            None if fully_active else "Аккаунт не полностью активен",
         ),
     )
     timestamps = [
@@ -140,7 +131,7 @@ def calculate_account_health(
             account.session_last_checked_at,
             account.created_at,
         )
-        if value is not None
+        if isinstance(value, datetime)
     ]
     return AccountHealth(
         account_id=account.id,
@@ -152,6 +143,22 @@ def calculate_account_health(
         recent_error_count=recent_errors,
         last_activity_at=max(timestamps) if timestamps else None,
     )
+
+
+def update_persisted_health(
+    session: Session,
+    account: AdvertisingAccount,
+    commit: bool = False,
+) -> AccountHealth:
+    """Refresh cached health fields after auth/proxy/account state changes."""
+    health = calculate_account_health(session, account, scheduler_running=True)
+    account.health_score = health.score
+    account.last_health_check = datetime.now(UTC).replace(tzinfo=None)
+    if commit:
+        session.commit()
+    else:
+        session.flush()
+    return health
 
 
 def health_indicator(score: int) -> str:

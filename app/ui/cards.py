@@ -45,7 +45,21 @@ def account_status(account: AdvertisingAccount) -> str:
         "paused": "⚪ На паузе",
         "warming": "🟡 Прогрев",
         "disabled": "⚪ Отключён",
+        "banned": "🔴 Заблокирован",
+        "error": "🔴 Ошибка",
+        "unverified": "🟡 Не проверен",
     }.get(account.status, "🟡 Требует проверки")
+
+
+def orchestration_status(account: AdvertisingAccount) -> str:
+    return {
+        "CREATED": "⚪ Создан",
+        "AUTHENTICATING": "🟡 Авторизация",
+        "ACTIVE": "🟢 Активен",
+        "DEGRADED": "🟡 Ограниченная работа",
+        "ERROR": "🔴 Ошибка",
+        "REAUTH_REQUIRED": "🔴 Нужна повторная авторизация",
+    }.get(account.orchestration_state or "CREATED", "🟡 Требует проверки")
 
 
 def format_account_card(
@@ -61,16 +75,29 @@ def format_account_card(
         proxy = "🔴 Недоступен"
     else:
         proxy = "🟡 Не проверен"
+    auth_status = {
+        "active": "🟢 Active",
+        "banned": "🔴 Banned",
+        "error": "🔴 Error",
+        "unverified": "🟡 Unverified",
+    }.get(account.auth_status or "unverified", "🟡 Unverified")
+    auth_error = (
+        account.orchestration_error or account.last_auth_error or account.last_error
+    )
     return (
         f"<b>{escape(account.display_name)}</b>\n\n"
         f"{SEPARATOR}\n\n"
         f"Телефон\n{escape(mask_phone(account.phone_number))}\n\n"
         f"Статус\n{account_status(account)}\n\n"
+        f"Состояние управления\n{orchestration_status(account)}\n\n"
         f"Telegram\n{telegram}\n\n"
+        f"Авторизация\n{auth_status}\n\n"
         f"Прокси\n{proxy}\n\n"
         f"Чаты\n{health.chat_count}\n\n"
         f"Шаблоны\n{health.template_count}\n\n"
         f"Последняя активность\n{format_datetime(health.last_activity_at)}\n\n"
+        f"Последняя проверка\n{format_datetime(account.last_health_check)}\n\n"
+        f"Ошибка\n{escape(auth_error or '—')}\n\n"
         f"Health\n{health_indicator(health.score)} {health.score}%\n\n"
         f"{SEPARATOR}"
     )

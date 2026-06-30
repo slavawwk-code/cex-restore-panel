@@ -6,6 +6,7 @@ from app.handlers.dashboard import router as dashboard_router
 from app.handlers.logs import router as logs_router
 from app.handlers.telethon_auth import router as telethon_auth_router
 from app.handlers.proxy import router as proxy_router
+from app.handlers.account_lifecycle import router as account_lifecycle_router
 
 __all__ = [
     "start_router",
@@ -16,4 +17,5 @@ __all__ = [
     "logs_router",
     "telethon_auth_router",
     "proxy_router",
+    "account_lifecycle_router",
 ]

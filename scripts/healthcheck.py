@@ -46,7 +46,11 @@ def main() -> int:
             with engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
             tables = set(inspect(engine).get_table_names())
-            if "advertising_accounts" not in tables:
+            if not {
+                "advertising_accounts",
+                "proxy_endpoints",
+                "autopilot_control_state",
+            }.issubset(tables):
                 failures.append("database schema is not initialized")
             else:
                 successes.append("database is reachable and initialized")
@@ -60,10 +64,14 @@ def main() -> int:
     try:
         asyncio.run(_exercise_service_lifecycles(settings))
         successes.append(
-            f"scheduler lifecycle is healthy ({settings.scheduler_interval_seconds}s interval)"
+            "autopilot/orchestrator/scheduler lifecycle is healthy "
+            f"({settings.scheduler_interval_seconds}s scheduler interval)"
         )
     except Exception as error:
-        failures.append(f"scheduler/proxy monitor check failed: {type(error).__name__}: {error}")
+        failures.append(
+            "autopilot/orchestrator/scheduler/proxy monitor check failed: "
+            f"{type(error).__name__}: {error}"
+        )
 
     try:
         from app.telethon.config import get_api_credentials
@@ -98,7 +106,7 @@ def main() -> int:
             successes.append(".env permissions are private")
         else:
             failures.append(".env permissions allow group/other access; use chmod 600 .env")
-    for session_file in settings.sessions_dir.glob("*.session"):
+    for session_file in settings.sessions_dir.rglob("*.session"):
         if not _is_private(session_file):
             failures.append(f"session permissions are too broad: {session_file.name}")
     return _report(successes, failures)
@@ -119,10 +127,20 @@ def _is_private(path: Path) -> bool:
 
 async def _exercise_service_lifecycles(settings) -> None:
     from app.scheduler import SchedulerService
+    from app.services.account_orchestrator import account_orchestrator
+    from app.services.autopilot_engine import autopilot_engine
     from app.services.proxy_monitor import ProxyMonitorService
 
     async def no_database_cycle() -> None:
         return None
+
+    await account_orchestrator.start()
+    if not account_orchestrator.running:
+        raise RuntimeError("account orchestrator did not start")
+    await autopilot_engine.start()
+    await asyncio.sleep(0)
+    if not autopilot_engine.running:
+        raise RuntimeError("autopilot engine did not start")
 
     scheduler = SchedulerService(settings.scheduler_interval_seconds)
     scheduler._check_and_send = no_database_cycle
@@ -142,6 +160,8 @@ async def _exercise_service_lifecycles(settings) -> None:
     if not monitor.running:
         raise RuntimeError("proxy monitor did not start")
     await monitor.stop()
+    await autopilot_engine.stop()
+    await account_orchestrator.stop()
 
 
 if __name__ == "__main__":

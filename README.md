@@ -31,6 +31,12 @@ Cex Restore Panel is designed to help manage advertising campaigns across multip
 - ✅ Background proxy monitoring with state-change alerts
 - ✅ Minimal account cards with a 100-point operational health score
 - ✅ Per-account proxy check history (latest 20 records)
+- ✅ Telethon `.session` import, phone-code/2FA login, and StringSession fallback
+- ✅ Central AccountOrchestrator with queues, bounded concurrency, state machine,
+  proxy allocation, health batches, and global/per-account throttling
+- ✅ Autopilot Engine with circuit breakers, adaptive concurrency, backpressure,
+  proxy scoring, account cooldowns, and bounded self-healing
+- ✅ Safe account lifecycle: disable, reauthenticate, and guarded hard deletion
 
 ## Technology Stack
 
@@ -125,6 +131,32 @@ Once running, open Telegram and search for your bot. The interface is entirely k
 The operator interface is in Russian. Internal code, database values, and logs
 remain in English.
 
+### Account orchestration
+
+All Telegram-facing UI operations and real sends pass through
+`AccountOrchestrator`. It limits active Telethon work to 3–5 clients, queues
+phone login steps, serializes operations for the same account, applies global
+and per-account delays, and processes health checks in batches. Persisted states
+are `CREATED`, `AUTHENTICATING`, `ACTIVE`, `DEGRADED`, `ERROR`, and
+`REAUTH_REQUIRED`.
+
+Reusable proxies are registered in `proxy_endpoints`. Assignment copies the
+endpoint into the existing per-account proxy fields for backward compatibility;
+automatic allocation chooses the least-used working proxy below its capacity.
+
+### Autopilot
+
+`AutopilotEngine` runs every 10–30 seconds and controls the orchestrator without
+calling Telethon directly. It observes rolling Telegram errors, proxy health,
+account states, queue depth, active work, and cached clients. The system state
+is persisted as `HEALTHY`, `LOAD_HIGH`, `DEGRADED`, `CRITICAL`, or `RECOVERY`.
+
+More than five FloodWait events per minute pauses new login work. Elevated
+account/proxy failure ratios reduce client concurrency and activate circuit
+breakers. Critical mode keeps one control slot for recovery while freezing
+non-critical sends. Failed accounts and proxies receive cooldowns; sessions are
+never deleted and accounts are never removed automatically.
+
 ### Proxy health monitoring
 
 Every configured account has two checks. **Быстрая проверка** tests only the
@@ -139,11 +171,9 @@ the state remains failed.
 
 ### Account health score
 
-The operator UI calculates health from existing operational data without
-changing sending behavior: Telegram authorization (20), working proxy (10),
-successful latest proxy check (10), running scheduler (15), enabled account
-(15), configured active templates (10), active chats (10), and no send errors
-in the previous 24 hours (10). The total is 100 points. Scores are displayed
+The account health score follows authentication readiness: Telegram connected
+(20), proxy working (10), valid session (20), no authorization errors (20),
+and fully active account (30). The total is 100 points. Scores are displayed
 as green at 90–100, yellow at 60–89, and red at 0–59.
 
 Each proxy test adds a credential-free record to `proxy_check_history`.
@@ -161,12 +191,34 @@ This is enabled by default for development.
 
 ## Advertising Accounts
 
-Adding an advertising account:
+Adding and authorizing an advertising account:
 1. Open the Management Bot
 2. Navigate to **Accounts** → **Add Account**
-3. Enter phone number (Telethon will start authentication)
-4. Confirm the code sent to Telegram
-5. Account is ready to use
+3. Create the account record with its phone number
+4. Open **Telegram** and choose one authorization method:
+   - import an authorized Telethon `.session` file (recommended for VPS);
+   - log in by phone code and optional 2FA password;
+   - add a StringSession as a fallback.
+5. Check the resulting status and health score.
+
+Session selection is deterministic: an existing file is always preferred,
+then StringSession, otherwise the phone-login flow creates
+`sessions/{account_id}.session`. Imported and generated session files use mode
+`600`. Uploaded files and pasted StringSession messages are deleted from the
+operator chat when Telegram permits it.
+
+### Account lifecycle
+
+Account settings expose soft disable, reauthentication, and owner-only hard
+delete. Disable removes the account from runtime sending but preserves its DB
+record and session. Reauthentication drains current work, archives the file in
+`sessions/reauth_archive/`, clears auth/proxy bindings, increments the auth
+generation, and opens a clean login flow. Hard delete is rejected while work is
+active unless the service API explicitly uses `force=True`; forced deletion
+waits for graceful completion before removing DB relations and session files.
+
+Owner commands are also available: `/account_disable ID`, `/account_reauth ID`,
+and `/account_delete ID`. Every command requires an inline confirmation.
 
 ### Per-account proxy
 

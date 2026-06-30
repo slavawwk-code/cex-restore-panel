@@ -51,6 +51,14 @@ class AdvertisingAccount(Base):
     session_last_checked_at = Column(DateTime, nullable=True)
     session_user_id = Column(String, nullable=True)
     session_username = Column(String, nullable=True)
+    api_id = Column(Integer, nullable=True)
+    api_hash = Column(String, nullable=True)
+    session_file_path = Column(String, nullable=True)
+    string_session = Column(Text, nullable=True)
+    auth_status = Column(String, nullable=False, default="unverified", index=True)
+    last_auth_error = Column(Text, nullable=True)
+    health_score = Column(Integer, nullable=False, default=0)
+    last_health_check = Column(DateTime, nullable=True)
 
     # Per-account proxy configuration
     proxy_enabled = Column(Boolean, nullable=False, default=False)
@@ -68,6 +76,18 @@ class AdvertisingAccount(Base):
     proxy_latency_ms = Column(Integer, nullable=True)
     proxy_detected_type = Column(String, nullable=True)
     proxy_diagnostics = Column(Text, nullable=True)
+    proxy_id = Column(Integer, nullable=True)
+    orchestration_state = Column(String, nullable=False, default="CREATED", index=True)
+    orchestration_error = Column(Text, nullable=True)
+    orchestration_updated_at = Column(DateTime, nullable=True)
+    autopilot_frozen_until = Column(DateTime, nullable=True, index=True)
+    autopilot_freeze_reason = Column(Text, nullable=True)
+    disabled_at = Column(DateTime, nullable=True)
+    reauth_requested_at = Column(DateTime, nullable=True)
+    lifecycle_updated_at = Column(DateTime, nullable=True)
+    lifecycle_reason = Column(Text, nullable=True)
+    login_attempt_count = Column(Integer, nullable=False, default=0)
+    auth_generation = Column(Integer, nullable=False, default=0)
 
     chats = relationship("Chat", back_populates="account", cascade="all, delete-orphan")
     send_logs = relationship("SendLog", back_populates="account", cascade="all, delete-orphan")
@@ -154,6 +174,47 @@ class ProxyCheckHistory(Base):
     error = Column(Text, nullable=True)
 
     account = relationship("AdvertisingAccount", back_populates="proxy_checks")
+
+
+class ProxyEndpoint(Base):
+    """Reusable proxy registry used by the account orchestrator."""
+
+    __tablename__ = "proxy_endpoints"
+
+    id = Column(Integer, primary_key=True)
+    proxy_type = Column(String, nullable=False)
+    host = Column(String, nullable=False)
+    port = Column(Integer, nullable=False)
+    username = Column(String, nullable=True)
+    password = Column(String, nullable=True)
+    enabled = Column(Boolean, nullable=False, default=True, index=True)
+    status = Column(String, nullable=False, default="unknown", index=True)
+    latency_ms = Column(Integer, nullable=True)
+    last_checked_at = Column(DateTime, nullable=True)
+    last_error = Column(Text, nullable=True)
+    max_accounts = Column(Integer, nullable=False, default=10)
+    score = Column(Integer, nullable=False, default=100)
+    success_count = Column(Integer, nullable=False, default=0)
+    failure_count = Column(Integer, nullable=False, default=0)
+    disabled_until = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, nullable=False, default=utc_now)
+
+
+class AutopilotControlState(Base):
+    """Single persisted snapshot of the system-level control state."""
+
+    __tablename__ = "autopilot_control_state"
+
+    id = Column(Integer, primary_key=True, default=1)
+    system_state = Column(String, nullable=False, default="HEALTHY", index=True)
+    action_taken = Column(Text, nullable=True)
+    reason = Column(Text, nullable=True)
+    affected_accounts = Column(Integer, nullable=False, default=0)
+    affected_proxies = Column(Integer, nullable=False, default=0)
+    client_limit = Column(Integer, nullable=False, default=5)
+    login_queue_paused = Column(Boolean, nullable=False, default=False)
+    proxy_pool_paused = Column(Boolean, nullable=False, default=False)
+    updated_at = Column(DateTime, nullable=False, default=utc_now)
 
 
 def init_db():

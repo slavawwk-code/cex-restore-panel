@@ -13,6 +13,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 from app.database.models import AdvertisingAccount, ProxyCheckHistory
+from app.services.account_health import update_persisted_health
 from app.telethon.config import get_api_credentials
 
 logger = logging.getLogger(__name__)
@@ -240,6 +241,7 @@ def configure_proxy(
     account.proxy_latency_ms = None
     account.proxy_detected_type = None
     account.proxy_diagnostics = None
+    update_persisted_health(session, account)
     session.commit()
     logger.info("Proxy configured for account %s", account.id)
 
@@ -247,6 +249,7 @@ def configure_proxy(
 def disable_proxy(session: Session, account: AdvertisingAccount) -> None:
     """Disable an account proxy without deleting its saved settings."""
     account.proxy_enabled = False
+    update_persisted_health(session, account)
     session.commit()
     logger.info("Proxy disabled for account %s", account.id)
 
@@ -444,6 +447,7 @@ def _apply_proxy_test_status(
         account.proxy_last_error = result.error or "неизвестная ошибка"
         account.proxy_latency_ms = None
     _record_proxy_check(session, account, result, now)
+    update_persisted_health(session, account)
     session.commit()
 
 

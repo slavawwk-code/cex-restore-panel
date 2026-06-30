@@ -23,6 +23,36 @@ ACCOUNT_PROXY_COLUMNS = {
     "proxy_diagnostics": "TEXT",
 }
 
+ACCOUNT_SESSION_COLUMNS = {
+    # These columns predate the multi-source session architecture, but are
+    # included here so a very old installation can still migrate in one pass.
+    "session_connected": "BOOLEAN DEFAULT FALSE",
+    "session_connected_at": "DATETIME",
+    "session_last_checked_at": "DATETIME",
+    "session_user_id": "VARCHAR",
+    "session_username": "VARCHAR",
+    "api_id": "INTEGER",
+    "api_hash": "VARCHAR",
+    "session_file_path": "VARCHAR",
+    "string_session": "TEXT",
+    "auth_status": "VARCHAR NOT NULL DEFAULT 'unverified'",
+    "last_auth_error": "TEXT",
+    "health_score": "INTEGER NOT NULL DEFAULT 0",
+    "last_health_check": "DATETIME",
+    "proxy_id": "INTEGER",
+    "orchestration_state": "VARCHAR NOT NULL DEFAULT 'CREATED'",
+    "orchestration_error": "TEXT",
+    "orchestration_updated_at": "DATETIME",
+    "autopilot_frozen_until": "DATETIME",
+    "autopilot_freeze_reason": "TEXT",
+    "disabled_at": "DATETIME",
+    "reauth_requested_at": "DATETIME",
+    "lifecycle_updated_at": "DATETIME",
+    "lifecycle_reason": "TEXT",
+    "login_attempt_count": "INTEGER NOT NULL DEFAULT 0",
+    "auth_generation": "INTEGER NOT NULL DEFAULT 0",
+}
+
 
 def run_startup_migrations(engine: Engine) -> None:
     """Apply small additive migrations required by existing installations."""
@@ -34,9 +64,10 @@ def run_startup_migrations(engine: Engine) -> None:
     existing_columns = {
         column["name"] for column in inspector.get_columns(table_name)
     }
+    required_columns = {**ACCOUNT_PROXY_COLUMNS, **ACCOUNT_SESSION_COLUMNS}
     missing_columns = {
         name: ddl
-        for name, ddl in ACCOUNT_PROXY_COLUMNS.items()
+        for name, ddl in required_columns.items()
         if name not in existing_columns
     }
     with engine.begin() as connection:
@@ -56,6 +87,27 @@ def run_startup_migrations(engine: Engine) -> None:
                 "AND proxy_last_check_at IS NOT NULL THEN 'failed' "
                 "ELSE 'unknown' END "
                 "WHERE proxy_status IS NULL OR proxy_status = 'unknown'"
+            )
+        )
+        connection.execute(
+            text(
+                "UPDATE advertising_accounts SET "
+                "auth_status = CASE "
+                "WHEN session_connected = TRUE THEN 'active' "
+                "ELSE 'unverified' END "
+                "WHERE auth_status IS NULL OR auth_status = 'unverified'"
+            )
+        )
+        connection.execute(
+            text(
+                "UPDATE advertising_accounts SET orchestration_state = CASE "
+                "WHEN auth_status IN ('error', 'banned') THEN 'ERROR' "
+                "WHEN session_connected = TRUE AND "
+                "(proxy_enabled = FALSE OR proxy_status = 'working') THEN 'ACTIVE' "
+                "WHEN session_connected = TRUE THEN 'DEGRADED' "
+                "ELSE 'REAUTH_REQUIRED' END "
+                "WHERE orchestration_state IS NULL "
+                "OR orchestration_state = 'CREATED'"
             )
         )
         connection.execute(
@@ -96,5 +148,64 @@ def run_startup_migrations(engine: Engine) -> None:
             text(
                 "CREATE INDEX IF NOT EXISTS ix_proxy_check_history_checked_at "
                 "ON proxy_check_history (checked_at)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS proxy_endpoints ("
+                "id INTEGER PRIMARY KEY, proxy_type VARCHAR NOT NULL, "
+                "host VARCHAR NOT NULL, port INTEGER NOT NULL, "
+                "username VARCHAR, password VARCHAR, "
+                "enabled BOOLEAN NOT NULL DEFAULT TRUE, "
+                "status VARCHAR NOT NULL DEFAULT 'unknown', "
+                "latency_ms INTEGER, last_checked_at DATETIME, "
+                "last_error TEXT, max_accounts INTEGER NOT NULL DEFAULT 10, "
+                "created_at DATETIME NOT NULL)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_proxy_endpoints_status "
+                "ON proxy_endpoints (status)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_proxy_endpoints_enabled "
+                "ON proxy_endpoints (enabled)"
+            )
+        )
+        proxy_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("proxy_endpoints")
+        }
+        for name, ddl in {
+            "score": "INTEGER NOT NULL DEFAULT 100",
+            "success_count": "INTEGER NOT NULL DEFAULT 0",
+            "failure_count": "INTEGER NOT NULL DEFAULT 0",
+            "disabled_until": "DATETIME",
+        }.items():
+            if name not in proxy_columns:
+                connection.execute(
+                    text(f"ALTER TABLE proxy_endpoints ADD COLUMN {name} {ddl}")
+                )
+        connection.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS autopilot_control_state ("
+                "id INTEGER PRIMARY KEY, "
+                "system_state VARCHAR NOT NULL DEFAULT 'HEALTHY', "
+                "action_taken TEXT, reason TEXT, "
+                "affected_accounts INTEGER NOT NULL DEFAULT 0, "
+                "affected_proxies INTEGER NOT NULL DEFAULT 0, "
+                "client_limit INTEGER NOT NULL DEFAULT 5, "
+                "login_queue_paused BOOLEAN NOT NULL DEFAULT FALSE, "
+                "proxy_pool_paused BOOLEAN NOT NULL DEFAULT FALSE, "
+                "updated_at DATETIME NOT NULL)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_autopilot_control_state_system_state "
+                "ON autopilot_control_state (system_state)"
             )
         )

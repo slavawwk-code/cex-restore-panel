@@ -28,8 +28,13 @@ def main() -> int:
         _sqlite_backup(settings.database_path, temporary / "cex_restore.db")
         session_backup_dir = temporary / "sessions"
         session_backup_dir.mkdir(mode=0o700)
-        for session_file in settings.sessions_dir.glob("*.session"):
-            _sqlite_backup(session_file, session_backup_dir / session_file.name)
+        for session_file in settings.sessions_dir.rglob("*.session"):
+            relative_path = session_file.relative_to(settings.sessions_dir)
+            if "delete_pending" in relative_path.parts:
+                continue
+            target = session_backup_dir / relative_path
+            target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            _sqlite_backup(session_file, target)
 
         if settings.env_file.is_file():
             env_backup = temporary / ".env.backup"

@@ -12,10 +12,20 @@ async def _exercise_async_services(settings) -> None:
     from aiogram import Bot
 
     from app.scheduler import SchedulerService
+    from app.services.account_orchestrator import account_orchestrator
+    from app.services.autopilot_engine import autopilot_engine
     from app.services.proxy_monitor import ProxyMonitorService
 
     async def no_database_cycle() -> None:
         return None
+
+    await account_orchestrator.start()
+    if not account_orchestrator.running:
+        raise RuntimeError("account orchestrator did not enter running state")
+    await autopilot_engine.start()
+    await asyncio.sleep(0)
+    if not autopilot_engine.running:
+        raise RuntimeError("autopilot engine did not enter running state")
 
     scheduler = SchedulerService()
     scheduler._check_and_send = no_database_cycle
@@ -36,6 +46,8 @@ async def _exercise_async_services(settings) -> None:
     if not monitor.running:
         raise RuntimeError("proxy monitor did not enter running state")
     await monitor.stop()
+    await autopilot_engine.stop()
+    await account_orchestrator.stop()
     await bot.session.close()
 
 
@@ -61,6 +73,8 @@ def main() -> int:
             "app.handlers",
             "app.scheduler",
             "app.services.sender",
+            "app.services.account_orchestrator",
+            "app.services.autopilot_engine",
             "app.services.proxy_monitor",
             "app.telethon.client",
             "main",
@@ -88,7 +102,10 @@ def main() -> int:
         )
         return 1
 
-    print("Smoke test passed: imports, configuration, database, scheduler, bot, proxy monitor")
+    print(
+        "Smoke test passed: imports, configuration, database, orchestrator, autopilot, "
+        "scheduler, bot, proxy monitor"
+    )
     print("No Telegram network connection was attempted.")
     return 0
 

@@ -54,6 +54,8 @@ class TelethonAuth(StatesGroup):
     confirming_phone = State()
     waiting_for_code = State()
     waiting_for_password = State()
+    waiting_for_session_file = State()
+    waiting_for_string_session = State()
 
 
 class ProxySetup(StatesGroup):

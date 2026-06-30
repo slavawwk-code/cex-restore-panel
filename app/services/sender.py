@@ -2,8 +2,8 @@ import logging
 from datetime import datetime
 from sqlalchemy.orm import Session
 from app.database.models import AdvertisingAccount, Chat, Template, SendLog
-from app.telethon.client import TelethonClientManager
 from app.config import load_settings
+from app.services.account_orchestrator import account_orchestrator
 from telethon.errors import (
     FloodWaitError,
     ChatWriteForbiddenError,
@@ -18,7 +18,8 @@ from telethon.errors import (
 logger = logging.getLogger(__name__)
 
 DRY_RUN = load_settings(require_secrets=False).dry_run
-telethon_manager = TelethonClientManager()
+# Backward-compatible alias. The orchestrator owns the actual client manager.
+telethon_manager = account_orchestrator.client_manager
 
 
 async def can_send_chat(account: AdvertisingAccount, chat: Chat, template: Template) -> tuple[bool, str]:
@@ -98,19 +99,21 @@ async def real_send(
         if not account.session_connected:
             raise UnauthorizedError("Сессия аккаунта не подключена")
 
-        # Get Telethon client
-        client = await telethon_manager.get_client(account)
-
-        if not client.is_connected():
-            await client.connect()
-
-        # Verify still authorized
-        if not await client.is_user_authorized():
-            raise UnauthorizedError("Клиент Telegram не авторизован")
-
-        # Send message
         try:
-            message = await client.send_message(chat.username_or_chat_id, template.text)
+            async def send_through_client(client, _fresh_account):
+                if not client.is_connected():
+                    await client.connect()
+                if not await client.is_user_authorized():
+                    raise UnauthorizedError("Клиент Telegram не авторизован")
+                return await client.send_message(
+                    chat.username_or_chat_id, template.text
+                )
+
+            message = await account_orchestrator.run_client_operation(
+                account.id,
+                "send_message",
+                send_through_client,
+            )
             message_id = message.id
 
             logger.info(

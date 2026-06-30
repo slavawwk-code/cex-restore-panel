@@ -72,13 +72,28 @@ LOG_MAX_BYTES=10485760
 LOG_BACKUP_COUNT=5
 SCHEDULER_CHECK_INTERVAL_SECONDS=60
 PROXY_MONITOR_INTERVAL_SECONDS=1800
+ORCHESTRATOR_MAX_CLIENTS=5
+ORCHESTRATOR_LOGIN_CONCURRENCY=3
+ORCHESTRATOR_HEALTH_BATCH_SIZE=4
+ORCHESTRATOR_GLOBAL_DELAY_SECONDS=0.25
+ORCHESTRATOR_ACCOUNT_DELAY_SECONDS=1.0
+ORCHESTRATOR_LOGIN_MAX_RETRIES=3
+AUTOPILOT_INTERVAL_SECONDS=15
+AUTOPILOT_QUEUE_THRESHOLD=20
+AUTOPILOT_RECOVERY_COOLDOWN_SECONDS=300
+AUTOPILOT_HEALTHY_CLIENTS=5
 ```
+
+These orchestrator limits are intentionally conservative. Do not raise the
+login/batch values above `5` manually. Autopilot may raise the shared client
+limit to `AUTOPILOT_HEALTHY_CLIENTS` (5–10) only while the system is healthy;
+it reduces the limit to 1–5 when load or errors increase.
 
 ## 4. Initialize and verify
 
 The smoke test creates missing directories, initializes the database, starts
-and stops the scheduler and proxy monitor, and constructs the aiogram bot. It
-does not connect to Telegram.
+and stops Autopilot, AccountOrchestrator, scheduler, and proxy monitor, and
+constructs the aiogram bot. It does not connect to Telegram.
 
 ```bash
 cd /opt/cex-restore-panel
@@ -148,6 +163,17 @@ Each timestamped directory under `backups/` contains:
 Backups contain credentials and Telegram sessions. Copy them to encrypted
 off-server storage and never commit them to Git.
 
+StringSession fallback values are stored inside SQLite, so the database backup
+is also a session credential backup. Imported/file-login sessions live under
+`sessions/{account_id}.session`; keep both the database and session directory
+together when moving the service to another VPS.
+
+Reauthentication preserves invalidated session files under
+`sessions/reauth_archive/`. They are credentials and must receive the same
+backup/encryption treatment as active sessions. Hard delete removes only files
+exclusively bound to that account; a shared legacy session path is retained to
+avoid damaging another account.
+
 ## 9. Restore procedure
 
 Choose one backup directory and replace `BACKUP_DIRECTORY` below:
@@ -158,10 +184,12 @@ sudo ./deployment/stop.sh
 sudo -u cexrestore ./deployment/backup.sh
 
 sudo -u cexrestore cp BACKUP_DIRECTORY/cex_restore.db data/cex_restore.db
-sudo -u cexrestore cp BACKUP_DIRECTORY/sessions/*.session sessions/
+sudo -u cexrestore cp -a BACKUP_DIRECTORY/sessions/. sessions/
 sudo chown -R cexrestore:cexrestore data sessions
 sudo chmod 700 data sessions
-sudo chmod 600 data/cex_restore.db sessions/*.session
+sudo chmod 600 data/cex_restore.db
+sudo find sessions -type d -exec chmod 700 {} +
+sudo find sessions -type f -name '*.session' -exec chmod 600 {} +
 
 sudo -u cexrestore .venv/bin/python scripts/smoke_test.py
 sudo ./deployment/start.sh
@@ -223,3 +251,9 @@ Do not run a second manual bot while the systemd service is active.
 The smoke test deliberately does not use the network. After systemd starts,
 perform Telegram authorization and proxy checks through the operator UI and
 inspect the application log for safe diagnostics.
+
+For unattended VPS operation, import an already authorized `.session` file or
+finish phone-code/2FA authorization once through the bot UI. Normal systemd
+startup never asks for interactive input. Per-account credentials are used
+when configured; otherwise `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` from
+`.env` remain the backward-compatible defaults.

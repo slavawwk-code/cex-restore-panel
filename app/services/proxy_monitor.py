@@ -7,9 +7,18 @@ from aiogram import Bot
 from app.database import get_session
 from app.database.models import AdvertisingAccount
 from app.config import load_settings
-from app.services.proxy import format_proxy_timestamp, run_fast_proxy_check
+from app.services.account_orchestrator import account_orchestrator
+from app.services.proxy import format_proxy_timestamp
 
 logger = logging.getLogger(__name__)
+
+
+async def run_fast_proxy_check(session, account: AdvertisingAccount):
+    """Compatibility adapter; production checks pass through the orchestrator."""
+    result = await account_orchestrator.check_proxy(account.id, full=False)
+    session.expire(account)
+    session.refresh(account)
+    return result
 
 
 class ProxyMonitorService:

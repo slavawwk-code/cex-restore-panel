@@ -38,6 +38,16 @@ class Settings:
     log_backup_count: int
     scheduler_interval_seconds: int
     proxy_monitor_interval_seconds: int
+    orchestrator_max_clients: int
+    orchestrator_login_concurrency: int
+    orchestrator_health_batch_size: int
+    orchestrator_global_delay_seconds: float
+    orchestrator_account_delay_seconds: float
+    orchestrator_login_max_retries: int
+    autopilot_interval_seconds: int
+    autopilot_queue_threshold: int
+    autopilot_recovery_cooldown_seconds: int
+    autopilot_healthy_clients: int
 
 
 def load_settings(require_secrets: bool = True) -> Settings:
@@ -70,6 +80,40 @@ def load_settings(require_secrets: bool = True) -> Settings:
     )
     proxy_interval = _parse_interval(
         "PROXY_MONITOR_INTERVAL_SECONDS", 1800, errors, minimum=0, maximum=86400
+    )
+    max_clients = _parse_interval(
+        "ORCHESTRATOR_MAX_CLIENTS", 5, errors, minimum=1, maximum=10
+    )
+    login_concurrency = _parse_interval(
+        "ORCHESTRATOR_LOGIN_CONCURRENCY", 3, errors, minimum=2, maximum=5
+    )
+    health_batch_size = _parse_interval(
+        "ORCHESTRATOR_HEALTH_BATCH_SIZE", 4, errors, minimum=3, maximum=5
+    )
+    global_delay = _parse_float(
+        "ORCHESTRATOR_GLOBAL_DELAY_SECONDS", 0.25, errors, minimum=0.0, maximum=10.0
+    )
+    account_delay = _parse_float(
+        "ORCHESTRATOR_ACCOUNT_DELAY_SECONDS", 1.0, errors, minimum=0.0, maximum=60.0
+    )
+    login_max_retries = _parse_interval(
+        "ORCHESTRATOR_LOGIN_MAX_RETRIES", 3, errors, minimum=1, maximum=5
+    )
+    autopilot_interval = _parse_interval(
+        "AUTOPILOT_INTERVAL_SECONDS", 15, errors, minimum=10, maximum=30
+    )
+    autopilot_queue_threshold = _parse_interval(
+        "AUTOPILOT_QUEUE_THRESHOLD", 20, errors, minimum=5, maximum=1000
+    )
+    autopilot_recovery_cooldown = _parse_interval(
+        "AUTOPILOT_RECOVERY_COOLDOWN_SECONDS",
+        300,
+        errors,
+        minimum=60,
+        maximum=86400,
+    )
+    autopilot_healthy_clients = _parse_interval(
+        "AUTOPILOT_HEALTHY_CLIENTS", 5, errors, minimum=5, maximum=10
     )
     log_max_bytes = _parse_interval(
         "LOG_MAX_BYTES", 10_485_760, errors, minimum=1_048_576, maximum=1_073_741_824
@@ -108,6 +152,16 @@ def load_settings(require_secrets: bool = True) -> Settings:
         log_backup_count=log_backup_count,
         scheduler_interval_seconds=scheduler_interval,
         proxy_monitor_interval_seconds=proxy_interval,
+        orchestrator_max_clients=max_clients,
+        orchestrator_login_concurrency=login_concurrency,
+        orchestrator_health_batch_size=health_batch_size,
+        orchestrator_global_delay_seconds=global_delay,
+        orchestrator_account_delay_seconds=account_delay,
+        orchestrator_login_max_retries=login_max_retries,
+        autopilot_interval_seconds=autopilot_interval,
+        autopilot_queue_threshold=autopilot_queue_threshold,
+        autopilot_recovery_cooldown_seconds=autopilot_recovery_cooldown,
+        autopilot_healthy_clients=autopilot_healthy_clients,
     )
 
 
@@ -178,6 +232,24 @@ def _parse_interval(
         return default
     if value > maximum:
         errors.append(f"{name} must not exceed {maximum}")
+        return default
+    return value
+
+
+def _parse_float(
+    name: str,
+    default: float,
+    errors: list[str],
+    minimum: float,
+    maximum: float,
+) -> float:
+    try:
+        value = float(os.getenv(name, str(default)).strip())
+    except ValueError:
+        errors.append(f"{name} must be a number")
+        return default
+    if not minimum <= value <= maximum:
+        errors.append(f"{name} must be between {minimum} and {maximum}")
         return default
     return value
 

@@ -3,9 +3,8 @@ import logging
 from telethon import TelegramClient
 
 from app.database.models import AdvertisingAccount
-from app.config import ensure_runtime_directories, load_settings
-from app.telethon.config import get_api_credentials
-from app.telethon.proxy import build_proxy, proxy_signature
+from app.services.account_sessions import create_account_client, session_signature
+from app.telethon.proxy import proxy_signature
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ class TelethonClientManager:
     async def get_client(self, account: AdvertisingAccount) -> TelegramClient:
         """Get or create a Telethon client for an advertising account."""
         account_id = account.id
-        current_signature = proxy_signature(account)
+        current_signature = (proxy_signature(account), session_signature(account))
         if (
             account_id in self.clients
             and self.proxy_signatures.get(account_id) != current_signature
@@ -28,16 +27,7 @@ class TelethonClientManager:
             await self.disconnect_client(account_id)
 
         if account_id not in self.clients:
-            api_id, api_hash = get_api_credentials()
-            settings = load_settings(require_secrets=False)
-            ensure_runtime_directories(settings)
-            session_path = settings.sessions_dir / account.telethon_session
-            client = TelegramClient(
-                str(session_path),
-                api_id,
-                api_hash,
-                proxy=build_proxy(account),
-            )
+            client = create_account_client(account)
             await client.connect()
             self.clients[account_id] = client
             self.proxy_signatures[account_id] = current_signature

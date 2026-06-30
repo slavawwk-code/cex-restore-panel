@@ -22,19 +22,14 @@ from app.services.proxy import (
     ProxyConfigurationError,
     ParsedProxy,
     ProxyStringParseError,
-    configure_proxy,
-    detect_working_proxy_type,
-    disable_proxy,
     format_proxy_confirmation,
     format_proxy_diagnostics,
     format_proxy_detection_failure,
     format_proxy_status_card,
     get_proxy_history,
     parse_proxy_string,
-    save_detected_proxy,
-    run_fast_proxy_check,
-    run_full_proxy_diagnostics,
 )
+from app.services.account_orchestrator import OrchestratorError, account_orchestrator
 from app.states import ProxySetup
 from app.ui.cards import format_proxy_history
 
@@ -332,10 +327,25 @@ async def callback_proxy_save_and_test(query: CallbackQuery, state: FSMContext):
     await query.message.edit_text(
         "🔍 Проверяю прокси…\n\nПробую:\n" + "\n".join(types_to_test)
     )
-    detection = await detect_working_proxy_type(
-        proxy_config,
-        candidate_types=types_to_test,
-    )
+    try:
+        detection = await account_orchestrator.assign_proxy(
+            account_id,
+            proxy_config=proxy_config,
+            validate=True,
+        )
+    except OrchestratorError as error:
+        await query.message.edit_text(
+            f"🔴 {error}",
+            reply_markup=get_proxy_detection_confirmation_keyboard(account_id),
+        )
+        return
+    except Exception:
+        logger.exception("Proxy assignment orchestration failed")
+        await query.message.edit_text(
+            "🔴 Не удалось выполнить проверку прокси.",
+            reply_markup=get_proxy_detection_confirmation_keyboard(account_id),
+        )
+        return
 
     session = get_session()
     try:
@@ -344,8 +354,8 @@ async def callback_proxy_save_and_test(query: CallbackQuery, state: FSMContext):
             await query.message.edit_text("🔴 Аккаунт не найден")
             await state.clear()
             return
-        if detection.success:
-            save_detected_proxy(session, account, proxy_config, detection)
+        if detection and detection.success:
+            session.refresh(account)
             await state.clear()
             await query.message.edit_text(
                 format_proxy_status_card(account)
@@ -367,31 +377,21 @@ async def callback_proxy_save_and_test(query: CallbackQuery, state: FSMContext):
 async def callback_proxy_save(query: CallbackQuery, state: FSMContext):
     account_id = int(query.data.split("_")[-1])
     data = await state.get_data()
-    session = get_session()
     try:
-        account = _get_account(session, account_id)
-        if not account:
-            await query.answer("🔴 Аккаунт не найден", show_alert=True)
-            return
-        configure_proxy(
-            session,
-            account,
-            data["proxy_type"],
-            data["host"],
-            data["port"],
-            data.get("username"),
-            data.get("password"),
+        proxy_config = _proxy_config_from_data(data)
+        await account_orchestrator.assign_proxy(
+            account_id,
+            proxy_config=proxy_config,
+            validate=False,
         )
         await state.clear()
         await query.message.edit_text(
             "🟢 Прокси сохранён.\n\nПроверить соединение?",
             reply_markup=get_proxy_saved_keyboard(account_id),
         )
-    except ProxyConfigurationError as error:
+    except (ProxyConfigurationError, OrchestratorError) as error:
         await query.answer(f"🔴 {error}", show_alert=True)
         return
-    finally:
-        session.close()
     await query.answer()
 
 
@@ -415,7 +415,8 @@ async def callback_proxy_fast_check(query: CallbackQuery):
         # Acknowledge immediately because Telethon connection tests may take time.
         await query.answer()
         await query.message.edit_text("🟢 Выполняю быструю проверку…")
-        await run_fast_proxy_check(session, account)
+        await account_orchestrator.check_proxy(account_id, full=False)
+        session.refresh(account)
         await query.message.edit_text(
             format_proxy_status_card(account),
             reply_markup=get_proxy_menu_keyboard(account_id, account.proxy_enabled),
@@ -444,7 +445,8 @@ async def callback_proxy_diagnostics(query: CallbackQuery):
             "🔍 Выполняю полную диагностику…\n\nПробую:\n"
             + "\n".join(candidate_types)
         )
-        detection = await run_full_proxy_diagnostics(session, account)
+        detection = await account_orchestrator.check_proxy(account_id, full=True)
+        session.refresh(account)
         await query.message.edit_text(
             format_proxy_status_card(account)
             + "\n\n"
@@ -479,17 +481,17 @@ async def callback_proxy_history(query: CallbackQuery):
 @router.callback_query(F.data.startswith("proxy_disable_"))
 async def callback_proxy_disable(query: CallbackQuery):
     account_id = int(query.data.split("_")[-1])
-    session = get_session()
     try:
-        account = _get_account(session, account_id)
-        if not account:
-            await query.answer("🔴 Аккаунт не найден", show_alert=True)
-            return
-        disable_proxy(session, account)
+        await account_orchestrator.disable_account_proxy(account_id)
         await query.message.edit_text(
             "⚪ Прокси отключён. Подключения этого аккаунта будут идти напрямую.",
             reply_markup=get_proxy_menu_keyboard(account_id, False),
         )
-    finally:
-        session.close()
+    except OrchestratorError as error:
+        await query.answer(f"🔴 {error}", show_alert=True)
+        return
+    except Exception:
+        logger.exception("Proxy disable orchestration failed")
+        await query.answer("🔴 Не удалось отключить прокси", show_alert=True)
+        return
     await query.answer()

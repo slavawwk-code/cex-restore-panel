@@ -19,9 +19,13 @@ from app.services.accounts import (
     list_accounts,
     get_account,
     update_account_status,
-    disable_account,
     get_account_by_phone,
 )
+from app.services.account_lifecycle_manager import (
+    AccountLifecycleError,
+    account_lifecycle_manager,
+)
+from app.services.account_orchestrator import account_orchestrator
 from app.scheduler import SchedulerService
 from app.services.account_health import calculate_account_health
 from app.ui.cards import (
@@ -321,6 +325,7 @@ async def callback_resume_account(query: CallbackQuery):
 
     try:
         if update_account_status(session, account_id, "active"):
+            account_orchestrator.enable_runtime_account(account_id)
             await query.answer("🟢 Аккаунт возобновлён")
             await callback_account_detail(query)
         else:
@@ -337,6 +342,7 @@ async def callback_activate_account(query: CallbackQuery):
 
     try:
         if update_account_status(session, account_id, "active"):
+            account_orchestrator.enable_runtime_account(account_id)
             await query.answer("🟢 Аккаунт активирован")
             await callback_account_detail(query)
         else:
@@ -365,16 +371,12 @@ async def callback_warming_account(query: CallbackQuery):
 async def callback_disable_account(query: CallbackQuery):
     """Disable an account."""
     account_id = int(query.data.split("_")[-1])
-    session = get_session()
-
     try:
-        if disable_account(session, account_id):
-            await query.answer("⚪ Аккаунт отключён")
-            await callback_account_detail(query)
-        else:
-            await query.answer("🔴 Не удалось отключить аккаунт", show_alert=True)
-    finally:
-        session.close()
+        await account_lifecycle_manager.disable_account(account_id)
+        await query.answer("⚪ Аккаунт отключён")
+        await callback_account_detail(query)
+    except AccountLifecycleError as error:
+        await query.answer(f"🔴 {error}", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("account_chats_"))

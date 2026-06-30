@@ -1,6 +1,7 @@
 import logging
 from sqlalchemy.orm import Session
 from app.database.models import AdvertisingAccount, Chat
+from app.services.account_health import update_persisted_health
 
 logger = logging.getLogger(__name__)
 
@@ -46,13 +47,22 @@ def update_account_status(session: Session, account_id: int, status: str) -> boo
         logger.warning(f"Account {account_id} not found")
         return False
 
-    valid_statuses = ["active", "paused", "warming", "disabled"]
+    valid_statuses = [
+        "active",
+        "paused",
+        "warming",
+        "disabled",
+        "banned",
+        "error",
+        "unverified",
+    ]
     if status not in valid_statuses:
         logger.warning(f"Invalid status: {status}")
         return False
 
     account.status = status
     account.last_error = None
+    update_persisted_health(session, account)
     session.commit()
     logger.info(f"Account {account_id} status changed to {status}")
     return True

@@ -18,7 +18,12 @@ logger = logging.getLogger(__name__)
 
 
 async def set_commands(bot: Bot) -> None:
-    commands = [BotCommand(command="start", description="Открыть главное меню")]
+    commands = [
+        BotCommand(command="start", description="Открыть главное меню"),
+        BotCommand(command="account_disable", description="Отключить аккаунт по ID"),
+        BotCommand(command="account_reauth", description="Сбросить авторизацию аккаунта"),
+        BotCommand(command="account_delete", description="Удалить аккаунт по ID"),
+    ]
     await bot.set_my_commands(commands)
 
 
@@ -27,6 +32,7 @@ async def run_bot(settings: Settings) -> None:
     from app.database import init_db
     from app.handlers import (
         accounts,
+        account_lifecycle_router,
         accounts_router,
         chats_router,
         dashboard,
@@ -40,7 +46,8 @@ async def run_bot(settings: Settings) -> None:
     from app.handlers.validator import router as validator_router
     from app.scheduler import SchedulerService
     from app.services.proxy_monitor import ProxyMonitorService
-    from app.services.sender import telethon_manager
+    from app.services.account_orchestrator import account_orchestrator
+    from app.services.autopilot_engine import autopilot_engine
 
     logger.info("Initializing Cex Restore Panel")
     init_db()
@@ -60,6 +67,7 @@ async def run_bot(settings: Settings) -> None:
         dispatcher = Dispatcher()
         dispatcher.include_router(start_router)
         dispatcher.include_router(accounts_router)
+        dispatcher.include_router(account_lifecycle_router)
         dispatcher.include_router(templates_router)
         dispatcher.include_router(chats_router)
         dispatcher.include_router(dashboard_router)
@@ -72,6 +80,8 @@ async def run_bot(settings: Settings) -> None:
         accounts.set_scheduler(scheduler_service)
 
         await set_commands(bot)
+        await account_orchestrator.start()
+        await autopilot_engine.start()
         await scheduler_service.start()
         scheduler_started = True
         await proxy_monitor.start()
@@ -83,10 +93,11 @@ async def run_bot(settings: Settings) -> None:
         )
         await dispatcher.start_polling(bot)
     finally:
+        await autopilot_engine.stop()
         await proxy_monitor.stop()
         if scheduler_started:
             await scheduler_service.stop()
-        await telethon_manager.disconnect_all()
+        await account_orchestrator.stop()
         await bot.session.close()
         logger.info("Bot stopped cleanly")
 
