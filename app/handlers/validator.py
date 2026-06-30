@@ -18,12 +18,12 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
-@router.callback_query(F.data == "campaigns_menu")
+@router.callback_query(F.data == "validator_menu")
 async def callback_validator_menu(query: CallbackQuery):
     """Show validator menu."""
     await query.message.edit_text(
-        "🧪 Campaign Validation & Simulation\n\n"
-        "Validate configuration and simulate sends before enabling real messaging.",
+        "✅ Проверка и симуляция\n\n"
+        "Проверьте конфигурацию и будущие отправки до включения рабочего режима.",
         reply_markup=get_validator_menu(),
     )
     await query.answer()
@@ -38,16 +38,16 @@ async def callback_validate_campaign(query: CallbackQuery):
         validator = CampaignValidator(session)
         summary = validator.validate_campaign()
 
-        text = "🔍 Campaign Validation\n\n"
-        text += f"Accounts checked: {summary['accounts_checked']}\n"
-        text += f"Chats checked: {summary['chats_checked']}\n"
-        text += f"Templates checked: {summary['templates_checked']}\n"
-        text += f"Issues found: {summary['total_issues']}\n\n"
+        text = "🔍 Проверка кампании\n\n"
+        text += f"Проверено аккаунтов: {summary['accounts_checked']}\n"
+        text += f"Проверено чатов: {summary['chats_checked']}\n"
+        text += f"Проверено шаблонов: {summary['templates_checked']}\n"
+        text += f"Найдено проблем: {summary['total_issues']}\n\n"
 
         if summary["is_valid"]:
-            text += "✅ Campaign is VALID\n\n"
+            text += "✅ Кампания готова к работе\n\n"
         else:
-            text += "❌ Problems detected:\n\n"
+            text += "❌ Обнаружены проблемы:\n\n"
 
         text += validator.format_issues()
 
@@ -67,27 +67,27 @@ async def callback_simulate_next(query: CallbackQuery):
         result = simulate_next_send(session)
 
         if not result["found"]:
-            text = "🧪 Next Send Simulation\n\n"
+            text = "🧪 Симуляция следующей отправки\n\n"
             text += f"❌ {result['reason']}\n\n"
-            text += "No eligible chats found."
+            text += "Подходящих чатов не найдено."
         else:
-            text = "🧪 Next Send Simulation\n\n"
+            text = "🧪 Симуляция следующей отправки\n\n"
 
             if result["would_send"]:
-                text += "✅ WOULD SEND NOW\n\n"
+                text += "✅ БУДЕТ ОТПРАВЛЕНО СЕЙЧАС\n\n"
             else:
-                text += "⏱️ SCHEDULED FOR LATER\n\n"
+                text += "⏱️ ЗАПЛАНИРОВАНО НА ПОЗЖЕ\n\n"
 
-            text += f"📱 Account: {result['account_name']}\n"
-            text += f"💬 Chat: {result['chat_title']}\n"
-            text += f"📝 Template: {result['template_name']}\n"
-            text += f"⏱️ Cooldown: {result['cooldown']} minutes\n"
+            text += f"📱 Аккаунт: {result['account_name']}\n"
+            text += f"💬 Чат: {result['chat_title']}\n"
+            text += f"📝 Шаблон: {result['template_name']}\n"
+            text += f"⏱️ Интервал: {result['cooldown']} мин.\n"
 
             if result["time_remaining"].total_seconds() > 0:
                 mins = int(result["time_remaining"].total_seconds() / 60)
-                text += f"⏲️ In: {mins} minutes\n"
+                text += f"⏲️ Через: {mins} мин.\n"
             else:
-                text += f"⏲️ NOW\n"
+                text += "⏲️ Сейчас\n"
 
         await query.message.edit_text(text, reply_markup=get_validator_back_keyboard())
 
@@ -123,23 +123,23 @@ async def callback_health_check(query: CallbackQuery):
         connected = sum(1 for a in accounts if a.session_connected)
         disconnected = sum(1 for a in accounts if not a.session_connected)
 
-        text = "💪 System Health Check\n\n"
+        text = "💪 Проверка системы\n\n"
 
-        text += f"📱 Advertising Accounts\n"
-        text += f"✅ {connected} connected\n"
+        text += "📱 Рекламные аккаунты\n"
+        text += f"✅ Подключено: {connected}\n"
         if disconnected > 0:
-            text += f"❌ {disconnected} disconnected\n"
+            text += f"❌ Не подключено: {disconnected}\n"
         text += "\n"
 
-        text += f"📝 Configuration\n"
-        text += f"✅ Database connected\n"
-        text += f"✅ All entities loaded\n\n"
+        text += "📝 Конфигурация\n"
+        text += "✅ База данных доступна\n"
+        text += "✅ Данные загружены\n\n"
 
         # Overall health
         total_accounts = len(accounts)
         if total_accounts > 0:
             health_percent = (connected / total_accounts) * 100
-            text += f"📊 Overall Health: {int(health_percent)}%\n"
+            text += f"📊 Общая готовность: {int(health_percent)}%\n"
 
         await query.message.edit_text(text, reply_markup=get_validator_back_keyboard())
 
@@ -158,12 +158,12 @@ async def callback_preview_schedule(query: CallbackQuery):
         duration = estimate_campaign_duration(sends)
 
         if not sends:
-            text = "📅 Schedule Preview\n\n"
-            text += "No scheduled sends found.\n"
+            text = "📅 Предпросмотр расписания\n\n"
+            text += "Запланированных отправок нет.\n"
         else:
-            text = "📅 Schedule Preview (Next 20)\n\n"
-            text += format_next_sends_list(sends, "Scheduled Sends")
-            text += f"\n⏱️ Estimated campaign duration: {duration}\n"
+            text = "📅 Ближайшие 20 отправок\n\n"
+            text += format_next_sends_list(sends, "Запланированные отправки")
+            text += f"\n⏱️ Оценка длительности кампании: {duration}\n"
 
         await query.message.edit_text(text, reply_markup=get_validator_back_keyboard())
 

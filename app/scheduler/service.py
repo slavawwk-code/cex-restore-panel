@@ -2,20 +2,24 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from app.database import get_session
-from app.database.models import Chat, AdvertisingAccount, SendLog, Template
+from app.database.models import Chat
+from app.config import load_settings
 from app.services.sender import send_message
-import os
 
 logger = logging.getLogger(__name__)
-DRY_RUN = os.getenv("DRY_RUN", "True").lower() == "true"
 
 
 class SchedulerService:
     """Service for scheduling and sending messages."""
 
-    def __init__(self):
+    def __init__(self, check_interval_seconds: int | None = None):
         self.running = False
         self.task = None
+        self.check_interval_seconds = (
+            check_interval_seconds
+            if check_interval_seconds is not None
+            else load_settings(require_secrets=False).scheduler_interval_seconds
+        )
 
     async def start(self):
         """Start the scheduler."""
@@ -44,15 +48,13 @@ class SchedulerService:
 
     async def _run(self):
         """Main scheduler loop."""
-        check_interval = int(os.getenv("SCHEDULER_CHECK_INTERVAL_SECONDS", "60"))
-
         while self.running:
             try:
                 await self._check_and_send()
             except Exception as e:
                 logger.error(f"Scheduler error: {e}", exc_info=True)
 
-            await asyncio.sleep(check_interval)
+            await asyncio.sleep(self.check_interval_seconds)
 
     async def _check_and_send(self):
         """

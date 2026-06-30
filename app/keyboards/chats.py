@@ -5,9 +5,9 @@ def get_chats_menu() -> InlineKeyboardMarkup:
     """Chats management menu."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Add Chat", callback_data="chat_create")],
-            [InlineKeyboardButton(text="📋 View Chats", callback_data="chats_view")],
-            [InlineKeyboardButton(text="⬅️ Back", callback_data="main_menu")],
+            [InlineKeyboardButton(text="Добавить чат", callback_data="chat_create")],
+            [InlineKeyboardButton(text="Список чатов", callback_data="chats_view")],
+            [InlineKeyboardButton(text="Назад", callback_data="main_menu")],
         ]
     )
 
@@ -20,8 +20,8 @@ def get_chats_list_keyboard(chats: list) -> InlineKeyboardMarkup:
         btn_text = f"{status_emoji} {chat.title}"
         buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"chat_detail_{chat.id}")])
 
-    buttons.append([InlineKeyboardButton(text="➕ Add New Chat", callback_data="chat_create")])
-    buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data="chats_list")])
+    buttons.append([InlineKeyboardButton(text="Добавить чат", callback_data="chat_create")])
+    buttons.append([InlineKeyboardButton(text="Назад", callback_data="chats_list")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -33,7 +33,7 @@ def get_accounts_selection_keyboard(accounts: list) -> InlineKeyboardMarkup:
         btn_text = f"{status_emoji} {account.display_name}"
         buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"create_chat_account_{account.id}")])
 
-    buttons.append([InlineKeyboardButton(text="❌ Cancel", callback_data="chats_list")])
+    buttons.append([InlineKeyboardButton(text="Отмена", callback_data="chats_list")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -44,7 +44,7 @@ def get_templates_selection_keyboard(templates: list) -> InlineKeyboardMarkup:
         btn_text = f"📝 {template.name}"
         buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"create_chat_template_{template.id}")])
 
-    buttons.append([InlineKeyboardButton(text="❌ Cancel", callback_data="chats_list")])
+    buttons.append([InlineKeyboardButton(text="Отмена", callback_data="chats_list")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -52,7 +52,7 @@ def get_chat_creation_cancel_keyboard() -> InlineKeyboardMarkup:
     """Keyboard for canceling chat creation."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Cancel", callback_data="chats_list")],
+            [InlineKeyboardButton(text="Отмена", callback_data="chats_list")],
         ]
     )
 
@@ -61,8 +61,8 @@ def get_chat_confirmation_keyboard() -> InlineKeyboardMarkup:
     """Keyboard for confirming chat creation."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Confirm", callback_data="chat_confirm_create")],
-            [InlineKeyboardButton(text="❌ Cancel", callback_data="chats_list")],
+            [InlineKeyboardButton(text="Подтвердить", callback_data="chat_confirm_create")],
+            [InlineKeyboardButton(text="Отмена", callback_data="chats_list")],
         ]
     )
 
@@ -72,17 +72,17 @@ def get_chat_detail_keyboard(chat_id: int, status: str) -> InlineKeyboardMarkup:
     buttons = []
 
     if status == "active":
-        buttons.append([InlineKeyboardButton(text="⏸️ Pause", callback_data=f"chat_pause_{chat_id}")])
+        buttons.append([InlineKeyboardButton(text="Приостановить", callback_data=f"chat_pause_{chat_id}")])
     elif status == "paused":
-        buttons.append([InlineKeyboardButton(text="▶️ Resume", callback_data=f"chat_resume_{chat_id}")])
+        buttons.append([InlineKeyboardButton(text="Возобновить", callback_data=f"chat_resume_{chat_id}")])
     elif status == "error":
-        buttons.append([InlineKeyboardButton(text="⚠️ View Error", callback_data=f"chat_error_{chat_id}")])
+        buttons.append([InlineKeyboardButton(text="Показать ошибку", callback_data=f"chat_error_{chat_id}")])
 
-    buttons.append([InlineKeyboardButton(text="🔄 Change Account", callback_data=f"chat_change_account_{chat_id}")])
-    buttons.append([InlineKeyboardButton(text="📝 Change Template", callback_data=f"chat_change_template_{chat_id}")])
-    buttons.append([InlineKeyboardButton(text="⏱️ Change Cooldown", callback_data=f"chat_change_cooldown_{chat_id}")])
-    buttons.append([InlineKeyboardButton(text="🚫 Disable Chat", callback_data=f"chat_disable_{chat_id}")])
-    buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data="chats_view")])
+    buttons.append([InlineKeyboardButton(text="Сменить аккаунт", callback_data=f"chat_change_account_{chat_id}")])
+    buttons.append([InlineKeyboardButton(text="Сменить шаблон", callback_data=f"chat_change_template_{chat_id}")])
+    buttons.append([InlineKeyboardButton(text="Изменить интервал", callback_data=f"chat_change_cooldown_{chat_id}")])
+    buttons.append([InlineKeyboardButton(text="Отключить чат", callback_data=f"chat_disable_{chat_id}")])
+    buttons.append([InlineKeyboardButton(text="Назад", callback_data="chats_view")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -95,7 +95,7 @@ def get_accounts_selection_for_change(accounts: list, chat_id: int) -> InlineKey
         btn_text = f"{status_emoji} {account.display_name}"
         buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"chat_set_account_{chat_id}_{account.id}")])
 
-    buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data=f"chat_detail_{chat_id}")])
+    buttons.append([InlineKeyboardButton(text="Назад", callback_data=f"chat_detail_{chat_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -106,7 +106,7 @@ def get_templates_selection_for_change(templates: list, chat_id: int) -> InlineK
         btn_text = f"📝 {template.name}"
         buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"chat_set_template_{chat_id}_{template.id}")])
 
-    buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data=f"chat_detail_{chat_id}")])
+    buttons.append([InlineKeyboardButton(text="Назад", callback_data=f"chat_detail_{chat_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -114,7 +114,7 @@ def get_chat_cooldown_cancel_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     """Keyboard for canceling cooldown change."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Cancel", callback_data=f"chat_detail_{chat_id}")],
+            [InlineKeyboardButton(text="Отмена", callback_data=f"chat_detail_{chat_id}")],
         ]
     )
 
@@ -123,6 +123,6 @@ def get_chat_error_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     """Keyboard for viewing chat error."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Back", callback_data=f"chat_detail_{chat_id}")],
+            [InlineKeyboardButton(text="Назад", callback_data=f"chat_detail_{chat_id}")],
         ]
     )

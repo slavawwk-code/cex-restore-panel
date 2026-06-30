@@ -34,7 +34,7 @@ def list_chats(session: Session, account_id: int = None, include_inactive: bool 
     query = session.query(Chat)
 
     if not include_inactive:
-        query = query.filter(Chat.is_active == True)
+        query = query.filter(Chat.is_active.is_(True))
 
     if account_id:
         query = query.filter(Chat.advertising_account_id == account_id)
@@ -61,9 +61,9 @@ def get_chat_info(session: Session, chat_id: int) -> dict | None:
         "title": chat.title,
         "username_or_chat_id": chat.username_or_chat_id,
         "account_id": chat.advertising_account_id,
-        "account_name": account.display_name if account else "Unknown",
+        "account_name": account.display_name if account else "неизвестно",
         "template_id": chat.assigned_template_id,
-        "template_name": template.name if template else "None",
+        "template_name": template.name if template else "не назначен",
         "cooldown_minutes": chat.cooldown_minutes,
         "status": chat.status,
         "is_active": chat.is_active,
@@ -163,7 +163,7 @@ def count_account_chats(session: Session, account_id: int, active_only: bool = T
     """Count chats for a specific account."""
     query = session.query(Chat).filter(Chat.advertising_account_id == account_id)
     if active_only:
-        query = query.filter(Chat.is_active == True)
+        query = query.filter(Chat.is_active.is_(True))
     return query.count()
 
 
@@ -171,7 +171,7 @@ def count_template_chats(session: Session, template_id: int, active_only: bool =
     """Count chats using a specific template."""
     query = session.query(Chat).filter(Chat.assigned_template_id == template_id)
     if active_only:
-        query = query.filter(Chat.is_active == True)
+        query = query.filter(Chat.is_active.is_(True))
     return query.count()
 
 

@@ -18,6 +18,10 @@ logs/
 *.log
 *.log.*
 
+# Database backups
+backups/
+*.db.backup
+
 # Python
 venv/
 .venv/

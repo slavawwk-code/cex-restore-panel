@@ -1,15 +1,22 @@
-from datetime import datetime
+from datetime import UTC, datetime
+import logging
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Text, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-import os
-from dotenv import load_dotenv
+from app.config import ensure_runtime_directories, load_settings
 
-load_dotenv()
+runtime_settings = load_settings(require_secrets=False)
+ensure_runtime_directories(runtime_settings)
+logger = logging.getLogger(__name__)
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/cex_restore.db")
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+def utc_now() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+engine = create_engine(
+    runtime_settings.database_url,
+    connect_args={"check_same_thread": False, "timeout": 30},
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -21,7 +28,7 @@ class User(Base):
     telegram_id = Column(Integer, unique=True, nullable=False)
     username = Column(String, nullable=True)
     role = Column(String, nullable=False, default="operator")  # owner, operator
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     def __repr__(self):
         return f"<User {self.telegram_id} ({self.role})>"
@@ -35,7 +42,7 @@ class AdvertisingAccount(Base):
     phone_number = Column(String, nullable=False, unique=True)
     telethon_session = Column(String, nullable=False)
     status = Column(String, nullable=False, default="warming", index=True)  # active, paused, warming, disabled
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
     last_error = Column(String, nullable=True)
 
     # Telethon session fields
@@ -45,8 +52,30 @@ class AdvertisingAccount(Base):
     session_user_id = Column(String, nullable=True)
     session_username = Column(String, nullable=True)
 
+    # Per-account proxy configuration
+    proxy_enabled = Column(Boolean, nullable=False, default=False)
+    proxy_type = Column(String, nullable=True)
+    proxy_host = Column(String, nullable=True)
+    proxy_port = Column(Integer, nullable=True)
+    proxy_username = Column(String, nullable=True)
+    proxy_password = Column(String, nullable=True)
+    proxy_last_check_at = Column(DateTime, nullable=True)
+    proxy_last_check_success = Column(Boolean, nullable=True)
+    proxy_status = Column(String, nullable=False, default="unknown", index=True)
+    proxy_last_checked_at = Column(DateTime, nullable=True)
+    proxy_last_success_at = Column(DateTime, nullable=True)
+    proxy_last_error = Column(String, nullable=True)
+    proxy_latency_ms = Column(Integer, nullable=True)
+    proxy_detected_type = Column(String, nullable=True)
+    proxy_diagnostics = Column(Text, nullable=True)
+
     chats = relationship("Chat", back_populates="account", cascade="all, delete-orphan")
     send_logs = relationship("SendLog", back_populates="account", cascade="all, delete-orphan")
+    proxy_checks = relationship(
+        "ProxyCheckHistory",
+        back_populates="account",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self):
         return f"<AdvertisingAccount {self.id} - {self.display_name} ({self.status})>"
@@ -65,7 +94,7 @@ class Chat(Base):
     is_active = Column(Boolean, default=True, index=True)
     last_sent_at = Column(DateTime, nullable=True)
     last_error = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     account = relationship("AdvertisingAccount", back_populates="chats")
     template = relationship("Template")
@@ -82,8 +111,8 @@ class Template(Base):
     name = Column(String, nullable=False, unique=True)
     text = Column(Text, nullable=False)
     is_active = Column(Boolean, default=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     def __repr__(self):
         return f"<Template {self.id} - {self.name}>"
@@ -100,7 +129,7 @@ class SendLog(Base):
     mode = Column(String, nullable=False, default="SIMULATION", index=True)  # SIMULATION, REAL
     error_message = Column(String, nullable=True)
     telegram_message_id = Column(Integer, nullable=True)
-    sent_at = Column(DateTime, default=datetime.utcnow, index=True)
+    sent_at = Column(DateTime, default=utc_now, index=True)
 
     account = relationship("AdvertisingAccount", back_populates="send_logs")
     chat = relationship("Chat", back_populates="send_logs")
@@ -109,11 +138,36 @@ class SendLog(Base):
         return f"<SendLog {self.id} - {self.status} ({self.mode}) at {self.sent_at}>"
 
 
+class ProxyCheckHistory(Base):
+    __tablename__ = "proxy_check_history"
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(
+        Integer,
+        ForeignKey("advertising_accounts.id"),
+        nullable=False,
+        index=True,
+    )
+    checked_at = Column(DateTime, nullable=False, default=utc_now, index=True)
+    status = Column(String, nullable=False)
+    latency_ms = Column(Integer, nullable=True)
+    error = Column(Text, nullable=True)
+
+    account = relationship("AdvertisingAccount", back_populates="proxy_checks")
+
+
 def init_db():
     """Initialize database tables."""
-    os.makedirs("data", exist_ok=True)
+    from app.database.migrations import run_startup_migrations
+
+    database_existed = bool(
+        runtime_settings.database_path and runtime_settings.database_path.exists()
+    )
     Base.metadata.create_all(bind=engine)
-    print("Database initialized successfully.")
+    run_startup_migrations(engine)
+    if runtime_settings.database_path is not None and not database_existed:
+        runtime_settings.database_path.chmod(0o600)
+    logger.info("Database initialized successfully")
 
 
 def get_session():

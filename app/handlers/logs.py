@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 async def callback_logs_menu(query: CallbackQuery):
     """Handle logs menu callback."""
     await query.message.edit_text(
-        "📋 Logs\n\nView send history and errors.",
+        "📋 Журнал\n\nИстория отправок и ошибок.",
         reply_markup=get_logs_menu(),
     )
     await query.answer()
@@ -38,7 +38,7 @@ async def callback_logs_recent(query: CallbackQuery):
     session = get_session()
     try:
         logs = list_recent_logs(session, limit=20)
-        text = format_logs_list(logs, "📋 Recent Logs (Last 20)")
+        text = format_logs_list(logs, "📋 Последние 20 событий")
 
         await query.message.edit_text(text, reply_markup=get_logs_back_keyboard())
     finally:
@@ -52,7 +52,7 @@ async def callback_logs_errors(query: CallbackQuery):
     session = get_session()
     try:
         logs = list_error_logs(session, limit=20)
-        text = format_logs_list(logs, "❌ Error Logs (Last 20)")
+        text = format_logs_list(logs, "❌ Последние 20 ошибок")
 
         await query.message.edit_text(text, reply_markup=get_logs_back_keyboard())
     finally:
@@ -66,7 +66,7 @@ async def callback_logs_success(query: CallbackQuery):
     session = get_session()
     try:
         logs = list_success_logs(session, limit=20)
-        text = format_logs_list(logs, "✅ Success Logs (Last 20)")
+        text = format_logs_list(logs, "✅ Последние 20 успешных отправок")
 
         await query.message.edit_text(text, reply_markup=get_logs_back_keyboard())
     finally:
@@ -83,14 +83,14 @@ async def callback_logs_by_account(query: CallbackQuery):
 
         if not accounts:
             await query.message.edit_text(
-                "❌ No accounts found.",
+                "❌ Аккаунты не найдены.",
                 reply_markup=get_logs_back_keyboard(),
             )
             await query.answer()
             return
 
         await query.message.edit_text(
-            "📱 Select Account\n\nChoose an account to see its logs:",
+            "📱 Выбор аккаунта\n\nВыберите аккаунт для просмотра журнала:",
             reply_markup=get_accounts_selection_for_logs(accounts),
         )
     finally:
@@ -108,11 +108,11 @@ async def callback_logs_account_selected(query: CallbackQuery):
         account = session.query(AdvertisingAccount).filter(AdvertisingAccount.id == account_id).first()
 
         if not account:
-            await query.answer("❌ Account not found", show_alert=True)
+            await query.answer("❌ Аккаунт не найден", show_alert=True)
             return
 
         logs = list_logs_by_account(session, account_id, limit=20)
-        text = format_logs_list(logs, f"📱 Logs for {account.display_name} (Last 20)")
+        text = format_logs_list(logs, f"📱 {account.display_name}: последние 20 событий")
 
         await query.message.edit_text(text, reply_markup=get_logs_back_keyboard())
     finally:
@@ -127,21 +127,21 @@ async def callback_logs_by_chat(query: CallbackQuery):
     try:
         chats = (
             session.query(Chat)
-            .filter(Chat.is_active == True)
+            .filter(Chat.is_active.is_(True))
             .order_by(Chat.title)
             .all()
         )
 
         if not chats:
             await query.message.edit_text(
-                "❌ No chats found.",
+                "❌ Чаты не найдены.",
                 reply_markup=get_logs_back_keyboard(),
             )
             await query.answer()
             return
 
         await query.message.edit_text(
-            "💬 Select Chat\n\nChoose a chat to see its logs:",
+            "💬 Выбор чата\n\nВыберите чат для просмотра журнала:",
             reply_markup=get_chats_selection_for_logs(chats),
         )
     finally:
@@ -159,11 +159,11 @@ async def callback_logs_chat_selected(query: CallbackQuery):
         chat = session.query(Chat).filter(Chat.id == chat_id).first()
 
         if not chat:
-            await query.answer("❌ Chat not found", show_alert=True)
+            await query.answer("❌ Чат не найден", show_alert=True)
             return
 
         logs = list_logs_by_chat(session, chat_id, limit=20)
-        text = format_logs_list(logs, f"💬 Logs for {chat.title} (Last 20)")
+        text = format_logs_list(logs, f"💬 {chat.title}: последние 20 событий")
 
         await query.message.edit_text(text, reply_markup=get_logs_back_keyboard())
     finally:

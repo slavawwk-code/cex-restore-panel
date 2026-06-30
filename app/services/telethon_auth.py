@@ -1,5 +1,6 @@
 import logging
-import os
+import asyncio
+from pathlib import Path
 from datetime import datetime
 from sqlalchemy.orm import Session
 from telethon import TelegramClient
@@ -11,18 +12,12 @@ from telethon.errors import (
     PhoneNumberInvalidError,
     RPCError,
 )
-from telethon.errors.rpc_error_list import (
-    PhoneCodeEmptySentError,
-    PhoneUnconfirmedError,
-)
 from app.database.models import AdvertisingAccount
+from app.config import ensure_runtime_directories, load_settings
+from app.telethon.config import get_api_credentials
+from app.telethon.proxy import build_proxy
 
 logger = logging.getLogger(__name__)
-
-SESSIONS_DIR = os.getenv("SESSIONS_DIR", "sessions")
-API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
-API_HASH = os.getenv("TELEGRAM_API_HASH", "")
-
 
 class TelethonAuthError(Exception):
     """Base exception for Telethon auth errors."""
@@ -32,47 +27,102 @@ class TelethonAuthError(Exception):
 
 def _get_session_path(account: AdvertisingAccount) -> str:
     """Get full path to session file."""
-    os.makedirs(SESSIONS_DIR, exist_ok=True)
-    return os.path.join(SESSIONS_DIR, account.telethon_session)
+    settings = load_settings(require_secrets=False)
+    ensure_runtime_directories(settings)
+    return str(settings.sessions_dir / account.telethon_session)
 
 
-async def send_login_code(account: AdvertisingAccount) -> str:
+def _create_client(account: AdvertisingAccount) -> TelegramClient:
+    """Create a Telethon client with current credentials and account proxy."""
+    api_id, api_hash = get_api_credentials()
+    return TelegramClient(
+        _get_session_path(account),
+        api_id,
+        api_hash,
+        proxy=build_proxy(account),
+        connection_retries=1,
+        request_retries=2,
+        timeout=15,
+    )
+
+
+def _describe_delivery(sent_code) -> str:
+    """Describe Telegram's selected login-code delivery channel."""
+    delivery_type = type(sent_code.type).__name__
+    delivery_labels = {
+        "SentCodeTypeApp": "в официальное приложение Telegram",
+        "SentCodeTypeSms": "по SMS",
+        "SentCodeTypeCall": "звонком",
+        "SentCodeTypeFlashCall": "флеш-звонком",
+        "SentCodeTypeMissedCall": "пропущенным звонком",
+        "SentCodeTypeEmailCode": "на электронную почту",
+        "SentCodeTypeFragmentSms": "через Fragment",
+    }
+    return delivery_labels.get(delivery_type, "выбранным Telegram способом")
+
+
+async def send_login_code(account: AdvertisingAccount) -> dict:
     """
     Send login code to phone number.
-    Returns phone number hash (needed for code verification).
+    Return the phone code hash and Telegram-selected delivery information.
     """
     if not account.phone_number:
-        raise TelethonAuthError("Phone number not set for this account")
+        raise TelethonAuthError("Для аккаунта не указан номер телефона")
 
+    client = None
     try:
-        session_path = _get_session_path(account)
-        client = TelegramClient(session_path, API_ID, API_HASH)
-        await client.connect()
+        client = _create_client(account)
+        await asyncio.wait_for(client.connect(), timeout=15)
+        if await client.is_user_authorized():
+            user = await client.get_me()
+            logger.info("Existing session is authorized for account %s", account.id)
+            return {
+                "already_authorized": True,
+                "user_id": str(user.id),
+                "username": user.username,
+            }
 
-        # Request code send
-        phone_code_hash = None
         try:
             result = await client.send_code_request(account.phone_number)
-            phone_code_hash = result.phone_code_hash
         except PhoneNumberInvalidError:
-            raise TelethonAuthError("Invalid phone number format")
-        except PhoneUnconfirmedError:
-            raise TelethonAuthError("Phone number not confirmed on Telegram")
+            raise TelethonAuthError("Telegram отклонил формат номера телефона")
         except FloodWaitError as e:
-            raise TelethonAuthError(f"Too many requests. Wait {e.seconds} seconds")
+            raise TelethonAuthError(
+                f"Слишком много запросов. Повторите через {e.seconds} сек."
+            )
         except RPCError as e:
-            raise TelethonAuthError(f"Telegram error: {str(e)}")
+            raise TelethonAuthError(
+                f"Telegram отклонил запрос ({type(e).__name__})"
+            )
 
-        logger.info(f"Login code sent to {account.phone_number} for account {account.id}")
-
-        await client.disconnect()
-        return phone_code_hash
+        logger.info("Login code requested for account %s", account.id)
+        return {
+            "already_authorized": False,
+            "phone_code_hash": result.phone_code_hash,
+            "delivery": _describe_delivery(result),
+            "timeout": getattr(result, "timeout", None),
+        }
 
     except TelethonAuthError:
         raise
+    except (asyncio.TimeoutError, ConnectionError, OSError) as e:
+        route = " через настроенный прокси" if account.proxy_enabled else ""
+        logger.warning(
+            "Connection failed while requesting login code for account %s: %s",
+            account.id,
+            type(e).__name__,
+        )
+        raise TelethonAuthError(
+            f"Не удалось подключиться к Telegram{route}. Проверьте сеть и прокси."
+        ) from e
     except Exception as e:
-        logger.error(f"Error sending login code for account {account.id}: {e}", exc_info=True)
-        raise TelethonAuthError(f"Failed to send login code: {str(e)}")
+        logger.error("Error sending login code for account %s", account.id, exc_info=True)
+        raise TelethonAuthError(
+            f"Не удалось запросить код ({type(e).__name__})"
+        ) from e
+    finally:
+        if client is not None:
+            await client.disconnect()
 
 
 async def sign_in_with_code(
@@ -84,36 +134,41 @@ async def sign_in_with_code(
     May raise SessionPasswordNeededError if 2FA password is required.
     """
     if not phone_code or len(phone_code) < 4:
-        raise TelethonAuthError("Invalid code format")
+        raise TelethonAuthError("Неверный формат кода")
 
+    client = None
     try:
-        session_path = _get_session_path(account)
-        client = TelegramClient(session_path, API_ID, API_HASH)
-        await client.connect()
+        client = _create_client(account)
+        await asyncio.wait_for(client.connect(), timeout=15)
 
         try:
-            user = await client.sign_in(account.phone_number, phone_code, phone_code_hash=phone_code_hash)
-            logger.info(f"User signed in: {user.first_name} (ID: {user.id}) for account {account.id}")
+            await client.sign_in(account.phone_number, phone_code, phone_code_hash=phone_code_hash)
+            logger.info("User signed in for account %s", account.id)
         except SessionPasswordNeededError:
-            await client.disconnect()
-            raise  # Re-raise to let handler know 2FA is needed
+            raise
         except PhoneCodeInvalidError:
-            raise TelethonAuthError("Invalid code. Please try again.")
+            raise TelethonAuthError("Telegram отклонил код. Проверьте цифры и повторите.")
         except PhoneCodeExpiredError:
-            raise TelethonAuthError("Code expired. Please request a new one.")
+            raise TelethonAuthError("Срок действия кода истёк. Запросите новый код.")
         except FloodWaitError as e:
-            raise TelethonAuthError(f"Too many attempts. Wait {e.seconds} seconds")
+            raise TelethonAuthError(
+                f"Слишком много попыток. Повторите через {e.seconds} сек."
+            )
         except RPCError as e:
-            raise TelethonAuthError(f"Telegram error: {str(e)}")
+            raise TelethonAuthError(
+                f"Telegram отклонил авторизацию ({type(e).__name__})"
+            )
 
-        await client.disconnect()
         return True
 
     except (TelethonAuthError, SessionPasswordNeededError):
         raise
     except Exception as e:
-        logger.error(f"Error signing in for account {account.id}: {e}", exc_info=True)
-        raise TelethonAuthError(f"Sign in failed: {str(e)}")
+        logger.error("Error signing in for account %s", account.id, exc_info=True)
+        raise TelethonAuthError(f"Ошибка авторизации ({type(e).__name__})") from e
+    finally:
+        if client is not None:
+            await client.disconnect()
 
 
 async def sign_in_with_password(account: AdvertisingAccount, password: str) -> bool:
@@ -122,27 +177,31 @@ async def sign_in_with_password(account: AdvertisingAccount, password: str) -> b
     Returns True if successful.
     """
     if not password:
-        raise TelethonAuthError("Password cannot be empty")
+        raise TelethonAuthError("Пароль не может быть пустым")
 
+    client = None
     try:
-        session_path = _get_session_path(account)
-        client = TelegramClient(session_path, API_ID, API_HASH)
-        await client.connect()
+        client = _create_client(account)
+        await asyncio.wait_for(client.connect(), timeout=15)
 
         try:
-            user = await client.sign_in(password=password)
-            logger.info(f"2FA authentication successful for account {account.id}")
+            await client.sign_in(password=password)
+            logger.info("2FA authentication successful for account %s", account.id)
         except Exception as e:
-            raise TelethonAuthError(f"Authentication failed: {str(e)}")
+            raise TelethonAuthError(
+                f"Telegram отклонил пароль ({type(e).__name__})"
+            ) from e
 
-        await client.disconnect()
         return True
 
     except TelethonAuthError:
         raise
     except Exception as e:
-        logger.error(f"Error during 2FA for account {account.id}: {e}", exc_info=True)
-        raise TelethonAuthError(f"2FA failed: {str(e)}")
+        logger.error("Error during 2FA for account %s", account.id, exc_info=True)
+        raise TelethonAuthError(f"Ошибка проверки 2FA ({type(e).__name__})") from e
+    finally:
+        if client is not None:
+            await client.disconnect()
 
 
 async def check_session_status(session: Session, account: AdvertisingAccount) -> dict:
@@ -151,11 +210,12 @@ async def check_session_status(session: Session, account: AdvertisingAccount) ->
     Update session status fields in database.
     Returns dict with status information.
     """
+    client = None
     try:
         session_path = _get_session_path(account)
 
         # Check if session file exists
-        if not os.path.exists(session_path + ".session"):
+        if not Path(session_path + ".session").is_file():
             account.session_connected = False
             account.session_user_id = None
             account.session_username = None
@@ -164,25 +224,25 @@ async def check_session_status(session: Session, account: AdvertisingAccount) ->
             logger.info(f"Session file not found for account {account.id}")
             return {
                 "connected": False,
-                "reason": "No session file",
+                "reason": "Файл сессии не найден",
                 "user_id": None,
                 "username": None,
             }
 
-        client = TelegramClient(session_path, API_ID, API_HASH)
-        await client.connect()
+        client = _create_client(account)
+        await asyncio.wait_for(client.connect(), timeout=15)
 
         is_authorized = await client.is_user_authorized()
 
         if is_authorized:
             user = await client.get_me()
             account.session_connected = True
+            if not account.session_connected_at:
+                account.session_connected_at = datetime.utcnow()
             account.session_user_id = str(user.id)
             account.session_username = user.username or f"ID: {user.id}"
             account.session_last_checked_at = datetime.utcnow()
             session.commit()
-            await client.disconnect()
-
             logger.info(f"Session verified for account {account.id}: {user.username or user.id}")
             return {
                 "connected": True,
@@ -196,12 +256,10 @@ async def check_session_status(session: Session, account: AdvertisingAccount) ->
             account.session_username = None
             account.session_last_checked_at = datetime.utcnow()
             session.commit()
-            await client.disconnect()
-
             logger.warning(f"Session not authorized for account {account.id}")
             return {
                 "connected": False,
-                "reason": "Session not authorized",
+                "reason": "Сессия не авторизована",
                 "user_id": None,
                 "username": None,
             }
@@ -214,10 +272,13 @@ async def check_session_status(session: Session, account: AdvertisingAccount) ->
 
         return {
             "connected": False,
-            "reason": f"Error: {str(e)}",
+            "reason": f"Ошибка проверки: {type(e).__name__}",
             "user_id": None,
             "username": None,
         }
+    finally:
+        if client is not None:
+            await client.disconnect()
 
 
 async def disconnect_session(session: Session, account: AdvertisingAccount, delete_file: bool = False) -> bool:
@@ -236,20 +297,23 @@ async def disconnect_session(session: Session, account: AdvertisingAccount, dele
         session.commit()
 
         # Try to disconnect client
+        client = None
         try:
-            client = TelegramClient(session_path, API_ID, API_HASH)
+            client = _create_client(account)
             await client.connect()
             await client.log_out()
-            await client.disconnect()
             logger.info(f"Client logged out for account {account.id}")
         except Exception as e:
             logger.warning(f"Error logging out client for account {account.id}: {e}")
+        finally:
+            if client is not None:
+                await client.disconnect()
 
         # Handle session file
         if delete_file:
             session_file = session_path + ".session"
-            if os.path.exists(session_file):
-                os.remove(session_file)
+            if Path(session_file).is_file():
+                Path(session_file).unlink()
                 logger.info(f"Session file deleted for account {account.id}")
 
         return True

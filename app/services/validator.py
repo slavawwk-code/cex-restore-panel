@@ -50,14 +50,14 @@ class CampaignValidator:
             # Check if active
             if account.status == "disabled":
                 self.issues.append(
-                    ValidationIssue("error", "account", account.display_name, "Account is disabled")
+                    ValidationIssue("error", "account", account.display_name, "Аккаунт отключён")
                 )
                 continue
 
             # Check if has chats
             if not account.chats:
                 self.issues.append(
-                    ValidationIssue("warning", "account", account.display_name, "No chats assigned")
+                    ValidationIssue("warning", "account", account.display_name, "Нет назначенных чатов")
                 )
 
             if not self.issues or self.issues[-1].entity_name != account.display_name:
@@ -81,7 +81,7 @@ class CampaignValidator:
                             "error",
                             "template",
                             template.name,
-                            f"Template disabled but {chats_using} chat(s) use it",
+                            f"Шаблон отключён, но используется в чатах: {chats_using}",
                         )
                     )
                 continue
@@ -93,7 +93,7 @@ class CampaignValidator:
 
     def validate_chats(self):
         """Validate all chats."""
-        chats = self.session.query(Chat).filter(Chat.is_active == True).all()
+        chats = self.session.query(Chat).filter(Chat.is_active.is_(True)).all()
 
         for chat in chats:
             self.chats_checked += 1
@@ -101,29 +101,34 @@ class CampaignValidator:
 
             # Check account
             if not chat.account:
-                issues_for_chat.append("Account missing")
+                issues_for_chat.append("Аккаунт не найден")
             elif chat.account.status == "disabled":
-                issues_for_chat.append("Account disabled")
+                issues_for_chat.append("Аккаунт отключён")
             elif chat.account.status != "active":
-                issues_for_chat.append(f"Account not active ({chat.account.status})")
+                status_label = {
+                    "paused": "на паузе",
+                    "warming": "на прогреве",
+                    "disabled": "отключён",
+                }.get(chat.account.status, "неактивен")
+                issues_for_chat.append(f"Аккаунт {status_label}")
 
             # Check template
             if not chat.assigned_template_id:
-                issues_for_chat.append("No template assigned")
+                issues_for_chat.append("Шаблон не назначен")
             elif not chat.template:
-                issues_for_chat.append("Assigned template missing")
+                issues_for_chat.append("Назначенный шаблон не найден")
             elif not chat.template.is_active:
-                issues_for_chat.append("Assigned template disabled")
+                issues_for_chat.append("Назначенный шаблон отключён")
 
             # Check cooldown
             if chat.cooldown_minutes < 1:
-                issues_for_chat.append("Cooldown < 1 minute")
+                issues_for_chat.append("Интервал меньше 1 минуты")
             elif chat.cooldown_minutes > 1440:
-                issues_for_chat.append("Cooldown > 1440 minutes")
+                issues_for_chat.append("Интервал больше 1440 минут")
 
             # Check username/id
             if not chat.username_or_chat_id:
-                issues_for_chat.append("Username or chat ID missing")
+                issues_for_chat.append("Не указан username или ID чата")
 
             if issues_for_chat:
                 for issue in issues_for_chat:
@@ -133,11 +138,11 @@ class CampaignValidator:
             else:
                 if chat.status == "paused":
                     self.issues.append(
-                        ValidationIssue("warning", "chat", chat.title, "Chat is paused")
+                        ValidationIssue("warning", "chat", chat.title, "Чат приостановлен")
                     )
                 elif chat.status == "error":
                     self.issues.append(
-                        ValidationIssue("warning", "chat", chat.title, "Chat has error status")
+                        ValidationIssue("warning", "chat", chat.title, "Чат находится в состоянии ошибки")
                     )
                 else:
                     self.issues.append(
@@ -151,7 +156,7 @@ class CampaignValidator:
         for account in accounts:
             if not account.session_connected:
                 self.issues.append(
-                    ValidationIssue("error", "session", account.display_name, "Session not connected")
+                    ValidationIssue("error", "session", account.display_name, "Сессия не подключена")
                 )
 
     def get_summary(self) -> dict:
@@ -174,7 +179,7 @@ class CampaignValidator:
     def format_issues(self) -> str:
         """Format issues for display."""
         if not self.issues:
-            return "No issues found!"
+            return "Проблем не найдено."
 
         text = ""
         by_type = {}
@@ -195,7 +200,13 @@ class CampaignValidator:
             else:
                 emoji = "✅"
 
-            text += f"{emoji} {first.entity_type.title()} \"{first.entity_name}\"\n"
+            entity_label = {
+                "account": "Аккаунт",
+                "chat": "Чат",
+                "template": "Шаблон",
+                "session": "Сессия",
+            }.get(first.entity_type, first.entity_type)
+            text += f"{emoji} {entity_label} «{first.entity_name}»\n"
 
             for issue in type_issues:
                 if issue.severity != "ok":

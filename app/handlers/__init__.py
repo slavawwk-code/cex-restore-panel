@@ -5,5 +5,15 @@ from app.handlers.chats import router as chats_router
 from app.handlers.dashboard import router as dashboard_router
 from app.handlers.logs import router as logs_router
 from app.handlers.telethon_auth import router as telethon_auth_router
+from app.handlers.proxy import router as proxy_router
 
-__all__ = ["start_router", "accounts_router", "templates_router", "chats_router", "dashboard_router", "logs_router", "telethon_auth_router"]
+__all__ = [
+    "start_router",
+    "accounts_router",
+    "templates_router",
+    "chats_router",
+    "dashboard_router",
+    "logs_router",
+    "telethon_auth_router",
+    "proxy_router",
+]

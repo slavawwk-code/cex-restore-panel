@@ -20,7 +20,7 @@ def create_account(
     )
     session.add(account)
     session.commit()
-    logger.info(f"Created account: {display_name} ({phone_number})")
+    logger.info("Created account: %s", display_name)
     return account
 
 

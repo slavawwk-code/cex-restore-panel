@@ -1,14 +1,18 @@
-# Testing Guide - Accounts Management
+# Руководство по тестированию
 
-This document explains how to test the Accounts Management functionality.
+Документ описывает ручную проверку интерфейса в Telegram. Старые подробные
+сценарии ниже могут сохранять прежние английские подписи, но фактический
+интерфейс полностью русифицирован.
 
 ## Setup
 
 1. **Install dependencies**
    ```bash
-   python -m venv venv
+   python3 -m venv venv
    source venv/bin/activate
-   pip install -r requirements.txt
+   python -m pip install -r requirements.txt
+   python -m pip check
+   python -m unittest discover -v
    ```
 
 2. **Configure environment**
@@ -28,6 +32,34 @@ This document explains how to test the Accounts Management functionality.
    ```bash
    python main.py
    ```
+   A successful startup initializes the database, starts the scheduler, and
+   logs `Starting polling...`. Stop it with `Ctrl+C` after the smoke test.
+
+## Первичная проверка в Telegram
+
+1. Отправить `/start` и убедиться, что меню состоит из четырёх симметричных
+   рядов по две кнопки.
+2. Открыть каждый раздел и проверить, что операторские тексты и кнопки на
+   русском языке.
+3. Открыть аккаунт → **Прокси** и сохранить тестовый SOCKS5/SOCKS4/HTTP proxy.
+   Основной сценарий: **Настроить прокси → Вставить строкой → вставить →
+   Сохранить → Проверить**. Отдельно проверить ручной режим.
+   Для строки без схемы интерфейс должен показать «Определить автоматически» и
+   проверить SOCKS5 → HTTP → SOCKS4. Для явной схемы проверяется только её тип;
+   `https://` использует HTTP CONNECT.
+4. Убедиться, что пароль не показывается в подтверждении, карточке и логах.
+5. Нажать **🟢 Быстрая проверка**, затем **🔍 Полная диагностика**. Для рабочего
+   proxy ожидается карточка с задержкой; для нерабочего — понятные ошибки по
+   проверенным типам.
+6. Нажать **Подключить Telegram** → **Запросить код**. Проверить, что бот
+   показывает выбранный Telegram канал доставки кода.
+7. Ввести код, при необходимости облачный пароль 2FA, затем проверить статус
+   сессии в карточке аккаунта.
+8. Сохранить `DRY_RUN=True` и пройти симулятор/валидатор без реальной отправки.
+
+Код Telegram обычно приходит служебным сообщением в официальное приложение,
+а не по SMS. Повторные запросы подряд могут вызвать FloodWait, поэтому между
+попытками нужно выдерживать указанную Telegram паузу.
 
 ## Testing Accounts Management Flow
 
@@ -1177,3 +1209,52 @@ session.close()
 | Navigation | ✅ | All back buttons work |
 | Database persistence | ✅ | SQLite |
 | Duplicate prevention | ✅ | Names and identity edits |
+# Proxy Monitoring Checks
+
+## Automated tests
+
+Run:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The proxy suite verifies single-type fast checks, ordered full diagnostics,
+database health updates, password masking, transition-only background alerts,
+and disabling monitoring with `PROXY_MONITOR_INTERVAL_SECONDS=0`.
+
+## Manual Telegram check
+
+1. Open **Аккаунты**, select an account, then open **🌐 Прокси**.
+2. Press **🟢 Быстрая проверка**. Only the saved type should be checked and a
+   status card with latency and check time should appear.
+3. Press **🔍 Полная диагностика**. An auto-detected proxy should show attempts
+   in the order SOCKS5, HTTP, SOCKS4 and stop after the first success. An
+   explicit-scheme proxy should show one attempt.
+4. Confirm that the proxy password is masked everywhere.
+5. For monitor testing, temporarily set
+   `PROXY_MONITOR_INTERVAL_SECONDS=30`, restart the bot, and make a known-good
+   proxy unavailable. The owner should receive one failure notification, no
+   repeated failure notification, and one recovery notification after the
+   proxy becomes available again.
+
+Set the interval back to `1800` after the test. A value of `0` disables the
+monitor completely.
+
+## Premium UI manual check
+
+1. Open the main menu and confirm that action buttons have no decorative
+   emoji and remain in the same four-by-two layout.
+2. Open **Аккаунты → Список аккаунтов**. Every account should show a health
+   status and percentage without exposing its phone number.
+3. Open an account. Confirm the structured card contains masked phone,
+   Telegram and proxy status, chat/template counts, last activity, and Health.
+4. Open **Health** and verify every component shows its score and a reason when
+   unhealthy.
+5. Open **Прокси**. Confirm the host is masked and the password and login are
+   absent. Run a fast check, then open **История** and verify the new record.
+6. Open **Кампании → Открыть dashboard**. Confirm grouped Accounts, Campaigns,
+   Proxy, Activity, System Health, and Accounts Health sections are visible.
+7. Tap an account button below the dashboard and confirm its account card
+   opens.
+8. Confirm action order is primary, secondary, dangerous action, then Back.

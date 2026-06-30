@@ -17,9 +17,8 @@ from app.keyboards.chats import (
     get_chat_cooldown_cancel_keyboard,
     get_chat_error_keyboard,
 )
-from app.keyboards.main import get_back_button
 from app.database import get_session
-from app.database.models import Chat, AdvertisingAccount, Template
+from app.database.models import Template
 from app.services.chats import (
     create_chat,
     list_chats,
@@ -30,7 +29,6 @@ from app.services.chats import (
     update_chat_cooldown,
     update_chat_status,
     disable_chat,
-    count_account_chats,
     get_status_emoji,
 )
 from app.services.accounts import list_accounts, get_account
@@ -44,7 +42,7 @@ logger = logging.getLogger(__name__)
 async def callback_chats_menu(query: CallbackQuery):
     """Handle chats menu callback."""
     await query.message.edit_text(
-        "💬 Chats Management\n\nWhat would you like to do?",
+        "💬 Управление чатами\n\nВыберите действие:",
         reply_markup=get_chats_menu(),
     )
     await query.answer()
@@ -59,26 +57,26 @@ async def callback_view_chats(query: CallbackQuery):
 
         if not chats:
             await query.message.edit_text(
-                "💬 Chats\n\nNo chats yet.\n\nCreate one to get started.",
+                "💬 Чаты\n\nЧатов пока нет.\n\nДобавьте первый чат.",
                 reply_markup=get_chats_menu(),
             )
             await query.answer()
             return
 
-        text = "💬 Chats\n\n"
+        text = "💬 Чаты\n\n"
         for chat in chats:
             emoji = get_status_emoji(chat.status)
-            account_name = chat.account.display_name if chat.account else "Unknown"
-            template_name = chat.template.name if chat.template else "None"
+            account_name = chat.account.display_name if chat.account else "неизвестно"
+            template_name = chat.template.name if chat.template else "не назначен"
 
             text += f"{emoji} {chat.title}\n"
             text += f"   📱 {account_name} • 📝 {template_name}\n"
-            text += f"   ⏱️ {chat.cooldown_minutes}m"
+            text += f"   ⏱️ {chat.cooldown_minutes} мин."
 
             if chat.last_sent_at:
-                text += f" • 📅 {chat.last_sent_at.strftime('%Y-%m-%d %H:%M')}"
+                text += f" • 📅 {chat.last_sent_at.strftime('%d.%m.%Y %H:%M')}"
             else:
-                text += f" • Never sent"
+                text += " • Отправок не было"
             text += "\n\n"
 
         await query.message.edit_text(text, reply_markup=get_chats_list_keyboard(chats))
@@ -96,25 +94,25 @@ async def callback_chat_detail(query: CallbackQuery):
     try:
         info = get_chat_info(session, chat_id)
         if not info:
-            await query.answer("❌ Chat not found", show_alert=True)
+            await query.answer("❌ Чат не найден", show_alert=True)
             return
 
         emoji = get_status_emoji(info["status"])
-        text = f"💬 Chat Details\n\n"
+        text = "💬 Карточка чата\n\n"
         text += f"{emoji} {info['title']}\n\n"
-        text += f"Chat ID: {info['username_or_chat_id']}\n"
-        text += f"📱 Account: {info['account_name']}\n"
-        text += f"📝 Template: {info['template_name']}\n"
-        text += f"⏱️ Cooldown: {info['cooldown_minutes']} minutes\n"
-        text += f"📅 Created: {info['created_at'].strftime('%Y-%m-%d %H:%M')}\n"
+        text += f"ID чата: {info['username_or_chat_id']}\n"
+        text += f"📱 Аккаунт: {info['account_name']}\n"
+        text += f"📝 Шаблон: {info['template_name']}\n"
+        text += f"⏱️ Интервал: {info['cooldown_minutes']} мин.\n"
+        text += f"📅 Создан: {info['created_at'].strftime('%d.%m.%Y %H:%M')}\n"
 
         if info["last_sent_at"]:
-            text += f"📤 Last sent: {info['last_sent_at'].strftime('%Y-%m-%d %H:%M')}\n"
+            text += f"📤 Последняя отправка: {info['last_sent_at'].strftime('%d.%m.%Y %H:%M')}\n"
         else:
-            text += f"📤 Never sent\n"
+            text += "📤 Отправок не было\n"
 
         if info["last_error"]:
-            text += f"\n⚠️ Error: {info['last_error'][:100]}\n"
+            text += f"\n⚠️ Ошибка: {info['last_error'][:100]}\n"
 
         await query.message.edit_text(
             text,
@@ -135,7 +133,7 @@ async def callback_create_chat_step1(query: CallbackQuery, state: FSMContext):
 
         if not active_accounts:
             await query.message.edit_text(
-                "❌ No active accounts available.\n\nCreate an account first.",
+                "❌ Нет активных аккаунтов.\n\nСначала создайте и активируйте аккаунт.",
                 reply_markup=get_chats_menu(),
             )
             await query.answer()
@@ -143,9 +141,8 @@ async def callback_create_chat_step1(query: CallbackQuery, state: FSMContext):
 
         await state.set_state(ChatCreation.selecting_account)
         await query.message.edit_text(
-            "💬 Create New Chat\n\n"
-            "Step 1: Select Advertising Account\n\n"
-            "Which account will handle this chat?",
+            "💬 Новый чат\n\n"
+            "Шаг 1 из 5: выберите рекламный аккаунт:",
             reply_markup=get_accounts_selection_keyboard(active_accounts),
         )
     finally:
@@ -162,13 +159,13 @@ async def callback_create_chat_step2(query: CallbackQuery, state: FSMContext):
     try:
         account = get_account(session, account_id)
         if not account:
-            await query.answer("❌ Account not found", show_alert=True)
+            await query.answer("❌ Аккаунт не найден", show_alert=True)
             return
 
         templates = list_templates(session, include_inactive=False)
         if not templates:
             await query.message.edit_text(
-                "❌ No active templates available.\n\nCreate a template first.",
+                "❌ Нет активных шаблонов.\n\nСначала создайте шаблон.",
                 reply_markup=get_chats_menu(),
             )
             await query.answer()
@@ -177,10 +174,9 @@ async def callback_create_chat_step2(query: CallbackQuery, state: FSMContext):
         await state.update_data(account_id=account_id, account_name=account.display_name)
         await state.set_state(ChatCreation.selecting_template)
         await query.message.edit_text(
-            "💬 Create New Chat\n\n"
-            f"Step 2: Select Template\n\n"
-            f"Account: {account.display_name}\n\n"
-            "Which template will this chat use?",
+            "💬 Новый чат\n\n"
+            "Шаг 2 из 5: выберите шаблон\n\n"
+            f"Аккаунт: {account.display_name}",
             reply_markup=get_templates_selection_keyboard(templates),
         )
     finally:
@@ -197,15 +193,15 @@ async def callback_create_chat_step3(query: CallbackQuery, state: FSMContext):
     try:
         template = session.query(Template).filter(Template.id == template_id).first()
         if not template:
-            await query.answer("❌ Template not found", show_alert=True)
+            await query.answer("❌ Шаблон не найден", show_alert=True)
             return
 
         await state.update_data(template_id=template_id, template_name=template.name)
         await state.set_state(ChatCreation.entering_username)
         await query.message.edit_text(
-            "💬 Create New Chat\n\n"
-            "Step 3: Chat Username or ID\n\n"
-            "Enter the chat username (e.g., @groupname) or chat ID (e.g., -100123456789)",
+            "💬 Новый чат\n\n"
+            "Шаг 3 из 5: введите @username или ID чата.\n"
+            "Например: @groupname или -100123456789.",
             reply_markup=get_chat_creation_cancel_keyboard(),
         )
     finally:
@@ -219,37 +215,35 @@ async def process_chat_username(message: Message, state: FSMContext):
     username = message.text.strip()
 
     if not username:
-        await message.answer("❌ Username or chat ID cannot be empty. Try again:")
+        await message.answer("❌ Username или ID чата не может быть пустым:")
         return
 
     if len(username) < 3:
-        await message.answer("❌ Invalid username or chat ID. Try again:")
+        await message.answer("❌ Username или ID чата указан неверно:")
         return
 
     if len(username) > 50:
-        await message.answer("❌ Username or chat ID too long. Try again:")
+        await message.answer("❌ Username или ID чата слишком длинный:")
         return
 
     if username.startswith("@"):
         if not re.match(r"^@[a-zA-Z0-9_]{3,32}$", username):
             await message.answer(
-                "❌ Invalid username format. Use @username (letters, numbers, underscores only).\n\nTry again:"
+                "❌ Неверный формат. Используйте @username из латинских букв, цифр и подчёркиваний:"
             )
             return
     else:
         if not username.lstrip("-").isdigit():
             await message.answer(
-                "❌ Invalid chat ID. Use either @username or negative number (e.g., -100123456789).\n\nTry again:"
+                "❌ Используйте @username или отрицательный числовой ID, например -100123456789:"
             )
             return
 
     await state.update_data(username_or_chat_id=username)
     await state.set_state(ChatCreation.entering_title)
     await message.answer(
-        f"✅ Chat: {username}\n\n"
-        "Step 4: Chat Display Name\n\n"
-        "What should be the display name for this chat?\n"
-        "(2–100 characters, e.g., 'MEXC Recovery')"
+        f"✅ Чат: {username}\n\n"
+        "Шаг 4 из 5: введите понятное название чата (2–100 символов):"
     )
 
 
@@ -259,20 +253,18 @@ async def process_chat_title(message: Message, state: FSMContext):
     title = message.text.strip()
 
     if not title or len(title) < 2:
-        await message.answer("❌ Display name must be at least 2 characters long. Try again:")
+        await message.answer("❌ Название должно содержать минимум 2 символа:")
         return
 
     if len(title) > 100:
-        await message.answer("❌ Display name must be 100 characters or less. Try again:")
+        await message.answer("❌ Название не должно превышать 100 символов:")
         return
 
     await state.update_data(title=title)
     await state.set_state(ChatCreation.entering_cooldown)
     await message.answer(
-        f"✅ Display name: {title}\n\n"
-        "Step 5: Cooldown (minutes)\n\n"
-        "How many minutes between messages?\n"
-        "(1–1440 minutes)"
+        f"✅ Название: {title}\n\n"
+        "Шаг 5 из 5: укажите интервал между сообщениями в минутах (1–1440):"
     )
 
 
@@ -282,11 +274,11 @@ async def process_chat_cooldown(message: Message, state: FSMContext):
     try:
         cooldown = int(message.text.strip())
     except ValueError:
-        await message.answer("❌ Please enter a valid number. Try again:")
+        await message.answer("❌ Введите целое число:")
         return
 
     if cooldown < 1 or cooldown > 1440:
-        await message.answer("❌ Cooldown must be between 1 and 1440 minutes. Try again:")
+        await message.answer("❌ Интервал должен быть от 1 до 1440 минут:")
         return
 
     data = await state.get_data()
@@ -296,14 +288,14 @@ async def process_chat_cooldown(message: Message, state: FSMContext):
     username = data["username_or_chat_id"]
 
     confirmation_text = (
-        "📋 Confirm Chat Configuration\n\n"
-        f"📱 Account: {account_name}\n"
-        f"📝 Template: {template_name}\n"
-        f"💬 Chat: {title}\n"
+        "📋 Проверьте настройки чата\n\n"
+        f"📱 Аккаунт: {account_name}\n"
+        f"📝 Шаблон: {template_name}\n"
+        f"💬 Чат: {title}\n"
         f"ID: {username}\n"
-        f"⏱️ Cooldown: {cooldown} minutes\n"
-        f"🟢 Status: Active\n\n"
-        "Is this correct?"
+        f"⏱️ Интервал: {cooldown} мин.\n"
+        "🟢 Статус: активен\n\n"
+        "Всё верно?"
     )
 
     await state.update_data(cooldown=cooldown)
@@ -329,18 +321,18 @@ async def confirm_chat_creation(query: CallbackQuery, state: FSMContext):
 
         await state.clear()
         await query.message.edit_text(
-            f"✅ Chat Created!\n\n"
+            f"✅ Чат создан\n\n"
             f"💬 {chat.title}\n"
             f"📱 {data['account_name']}\n"
             f"📝 {data['template_name']}\n"
-            f"⏱️ {data['cooldown']}m\n\n"
-            f"The chat is ready and will receive messages on schedule.",
+            f"⏱️ {data['cooldown']} мин.\n\n"
+            "Чат добавлен в расписание.",
             reply_markup=get_chats_menu(),
         )
     except Exception as e:
         logger.error(f"Error creating chat: {e}", exc_info=True)
         await query.message.edit_text(
-            f"❌ Error creating chat: {str(e)}",
+            "❌ Не удалось создать чат.",
             reply_markup=get_chats_menu(),
         )
     finally:
@@ -357,10 +349,10 @@ async def callback_pause_chat(query: CallbackQuery):
 
     try:
         if update_chat_status(session, chat_id, "paused"):
-            await query.answer("✅ Chat paused")
+            await query.answer("✅ Чат приостановлен")
             await callback_chat_detail(query)
         else:
-            await query.answer("❌ Failed to pause chat", show_alert=True)
+            await query.answer("❌ Не удалось приостановить чат", show_alert=True)
     finally:
         session.close()
 
@@ -373,10 +365,10 @@ async def callback_resume_chat(query: CallbackQuery):
 
     try:
         if update_chat_status(session, chat_id, "active"):
-            await query.answer("✅ Chat resumed")
+            await query.answer("✅ Чат возобновлён")
             await callback_chat_detail(query)
         else:
-            await query.answer("❌ Failed to resume chat", show_alert=True)
+            await query.answer("❌ Не удалось возобновить чат", show_alert=True)
     finally:
         session.close()
 
@@ -392,11 +384,11 @@ async def callback_change_chat_account(query: CallbackQuery):
         active_accounts = [a for a in accounts if a.status == "active"]
 
         if not active_accounts:
-            await query.answer("❌ No active accounts available", show_alert=True)
+            await query.answer("❌ Нет активных аккаунтов", show_alert=True)
             return
 
         await query.message.edit_text(
-            "💬 Change Account\n\nSelect the new account:",
+            "💬 Смена аккаунта\n\nВыберите новый аккаунт:",
             reply_markup=get_accounts_selection_for_change(active_accounts, chat_id),
         )
     finally:
@@ -414,10 +406,10 @@ async def callback_set_chat_account(query: CallbackQuery):
 
     try:
         if update_chat_account(session, chat_id, account_id):
-            await query.answer("✅ Account changed")
+            await query.answer("✅ Аккаунт изменён")
             await callback_chat_detail(query)
         else:
-            await query.answer("❌ Failed to change account", show_alert=True)
+            await query.answer("❌ Не удалось изменить аккаунт", show_alert=True)
     finally:
         session.close()
 
@@ -432,11 +424,11 @@ async def callback_change_chat_template(query: CallbackQuery):
         templates = list_templates(session, include_inactive=False)
 
         if not templates:
-            await query.answer("❌ No active templates available", show_alert=True)
+            await query.answer("❌ Нет активных шаблонов", show_alert=True)
             return
 
         await query.message.edit_text(
-            "💬 Change Template\n\nSelect the new template:",
+            "💬 Смена шаблона\n\nВыберите новый шаблон:",
             reply_markup=get_templates_selection_for_change(templates, chat_id),
         )
     finally:
@@ -454,10 +446,10 @@ async def callback_set_chat_template(query: CallbackQuery):
 
     try:
         if update_chat_template(session, chat_id, template_id):
-            await query.answer("✅ Template changed")
+            await query.answer("✅ Шаблон изменён")
             await callback_chat_detail(query)
         else:
-            await query.answer("❌ Failed to change template", show_alert=True)
+            await query.answer("❌ Не удалось изменить шаблон", show_alert=True)
     finally:
         session.close()
 
@@ -471,15 +463,15 @@ async def callback_change_cooldown(query: CallbackQuery, state: FSMContext):
     try:
         chat = get_chat(session, chat_id)
         if not chat:
-            await query.answer("❌ Chat not found", show_alert=True)
+            await query.answer("❌ Чат не найден", show_alert=True)
             return
 
         await state.set_state(ChatEdit.changing_cooldown)
         await state.update_data(chat_id=chat_id)
         await query.message.edit_text(
-            f"💬 Change Cooldown\n\n"
-            f"Current cooldown: {chat.cooldown_minutes} minutes\n\n"
-            f"Enter the new cooldown (1–1440 minutes):",
+            "💬 Изменение интервала\n\n"
+            f"Текущий интервал: {chat.cooldown_minutes} мин.\n\n"
+            "Введите новый интервал (1–1440 минут):",
             reply_markup=get_chat_cooldown_cancel_keyboard(chat_id),
         )
     finally:
@@ -493,11 +485,11 @@ async def process_new_cooldown(message: Message, state: FSMContext):
     try:
         cooldown = int(message.text.strip())
     except ValueError:
-        await message.answer("❌ Please enter a valid number. Try again:")
+        await message.answer("❌ Введите целое число:")
         return
 
     if cooldown < 1 or cooldown > 1440:
-        await message.answer("❌ Cooldown must be between 1 and 1440 minutes. Try again:")
+        await message.answer("❌ Интервал должен быть от 1 до 1440 минут:")
         return
 
     data = await state.get_data()
@@ -507,11 +499,9 @@ async def process_new_cooldown(message: Message, state: FSMContext):
     try:
         if update_chat_cooldown(session, chat_id, cooldown):
             await state.clear()
-            await message.answer("✅ Cooldown updated successfully")
-            query_obj = type("obj", (object,), {"data": f"chat_detail_{chat_id}", "message": message})()
-            await callback_chat_detail(query_obj)
+            await message.answer("✅ Интервал обновлён")
         else:
-            await message.answer("❌ Failed to update cooldown")
+            await message.answer("❌ Не удалось обновить интервал")
     finally:
         session.close()
 
@@ -525,17 +515,17 @@ async def callback_view_chat_error(query: CallbackQuery):
     try:
         chat = get_chat(session, chat_id)
         if not chat:
-            await query.answer("❌ Chat not found", show_alert=True)
+            await query.answer("❌ Чат не найден", show_alert=True)
             return
 
         if not chat.last_error:
             await query.message.edit_text(
-                "❌ No error recorded for this chat.",
+                "✅ Для этого чата ошибок не записано.",
                 reply_markup=get_chat_error_keyboard(chat_id),
             )
         else:
             await query.message.edit_text(
-                f"⚠️ Last Error\n\n{chat.last_error}",
+                f"⚠️ Последняя ошибка\n\n{chat.last_error}",
                 reply_markup=get_chat_error_keyboard(chat_id),
             )
     finally:
@@ -551,17 +541,17 @@ async def callback_disable_chat(query: CallbackQuery):
 
     try:
         if disable_chat(session, chat_id):
-            await query.answer("✅ Chat disabled")
+            await query.answer("✅ Чат отключён")
             await callback_view_chats(query)
         else:
-            await query.answer("❌ Failed to disable chat", show_alert=True)
+            await query.answer("❌ Не удалось отключить чат", show_alert=True)
     finally:
         session.close()
 
 
-@router.callback_query(ChatCreation.waiting_for_username, F.data == "chats_list")
-@router.callback_query(ChatCreation.waiting_for_title, F.data == "chats_list")
-@router.callback_query(ChatCreation.waiting_for_cooldown, F.data == "chats_list")
+@router.callback_query(ChatCreation.entering_username, F.data == "chats_list")
+@router.callback_query(ChatCreation.entering_title, F.data == "chats_list")
+@router.callback_query(ChatCreation.entering_cooldown, F.data == "chats_list")
 @router.callback_query(ChatCreation.confirmation, F.data == "chats_list")
 async def cancel_chat_creation(query: CallbackQuery, state: FSMContext):
     """Cancel chat creation."""

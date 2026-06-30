@@ -1,7 +1,7 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from sqlalchemy.orm import Session
-from app.database.models import SendLog, AdvertisingAccount, Chat, Template
+from app.database.models import SendLog
 
 logger = logging.getLogger(__name__)
 
@@ -98,23 +98,23 @@ def get_last_error_log(session: Session) -> SendLog | None:
 def format_log_entry(log: SendLog) -> str:
     """Format a send log for display."""
     emoji = "✅" if log.status == "success" else "❌"
-    account_name = log.account.display_name if log.account else "Unknown"
-    chat_title = log.chat.title if log.chat else "Unknown"
-    template_name = log.template.name if log.template else "None"
+    account_name = log.account.display_name if log.account else "неизвестно"
+    chat_title = log.chat.title if log.chat else "неизвестно"
+    template_name = log.template.name if log.template else "не назначен"
 
-    text = f"{emoji} {log.sent_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+    text = f"{emoji} {log.sent_at.strftime('%d.%m.%Y %H:%M:%S')}\n"
     text += f"📱 {account_name} • 💬 {chat_title} • 📝 {template_name}\n"
 
     if log.error_message:
-        text += f"⚠️ Error: {log.error_message[:80]}\n"
+        text += f"⚠️ Ошибка: {log.error_message[:80]}\n"
 
     return text
 
 
-def format_logs_list(logs: list, title: str = "📋 Logs") -> str:
+def format_logs_list(logs: list, title: str = "📋 Журнал") -> str:
     """Format a list of logs for display."""
     if not logs:
-        return f"{title}\n\nNo logs found yet."
+        return f"{title}\n\nЗаписей пока нет."
 
     text = f"{title}\n\n"
     for log in logs:

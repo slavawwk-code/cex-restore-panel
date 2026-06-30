@@ -9,12 +9,9 @@ from app.keyboards.templates import (
     get_template_detail_keyboard,
     get_template_creation_keyboard,
     get_template_confirmation_keyboard,
-    get_template_edit_menu,
     get_template_edit_confirmation_keyboard,
 )
-from app.keyboards.main import get_back_button
 from app.database import get_session
-from app.database.models import Template
 from app.services.templates import (
     create_template,
     list_templates,
@@ -25,7 +22,6 @@ from app.services.templates import (
     update_template_text,
     disable_template,
     enable_template,
-    get_template_info,
     get_template_preview,
 )
 
@@ -37,7 +33,7 @@ logger = logging.getLogger(__name__)
 async def callback_templates_menu(query: CallbackQuery):
     """Handle templates menu callback."""
     await query.message.edit_text(
-        "📝 Templates Management\n\nWhat would you like to do?",
+        "📝 Управление шаблонами\n\nВыберите действие:",
         reply_markup=get_templates_menu(),
     )
     await query.answer()
@@ -52,18 +48,18 @@ async def callback_view_templates(query: CallbackQuery):
 
         if not templates:
             await query.message.edit_text(
-                "📝 Templates\n\nNo templates yet.\n\nCreate one to get started.",
+                "📝 Шаблоны\n\nШаблонов пока нет.\n\nСоздайте первый шаблон.",
                 reply_markup=get_templates_menu(),
             )
             await query.answer()
             return
 
-        text = "📝 Templates\n\n"
+        text = "📝 Шаблоны\n\n"
         for template in templates:
             preview = get_template_preview(template.text, max_length=50)
             text += f"📝 {template.name}\n"
             text += f"   {preview}\n"
-            text += f"   📅 {template.created_at.strftime('%Y-%m-%d')}\n\n"
+            text += f"   📅 {template.created_at.strftime('%d.%m.%Y')}\n\n"
 
         await query.message.edit_text(text, reply_markup=get_templates_list_keyboard(templates))
     finally:
@@ -81,17 +77,17 @@ async def callback_template_detail(query: CallbackQuery):
         template = get_template(session, template_id)
 
         if not template:
-            await query.answer("❌ Template not found", show_alert=True)
+            await query.answer("❌ Шаблон не найден", show_alert=True)
             return
 
-        text = f"📝 Template Details\n\n"
-        text += f"Name: {template.name}\n\n"
-        text += f"Text:\n{template.text}\n\n"
-        text += f"📅 Created: {template.created_at.strftime('%Y-%m-%d %H:%M')}\n"
-        text += f"📝 Updated: {template.updated_at.strftime('%Y-%m-%d %H:%M')}\n"
+        text = "📝 Карточка шаблона\n\n"
+        text += f"Название: {template.name}\n\n"
+        text += f"Текст:\n{template.text}\n\n"
+        text += f"📅 Создан: {template.created_at.strftime('%d.%m.%Y %H:%M')}\n"
+        text += f"📝 Изменён: {template.updated_at.strftime('%d.%m.%Y %H:%M')}\n"
 
         if not template.is_active:
-            text += "\n⚠️ This template is disabled"
+            text += "\n⚠️ Шаблон отключён"
 
         await query.message.edit_text(
             text,
@@ -107,9 +103,8 @@ async def callback_create_template_start(query: CallbackQuery, state: FSMContext
     """Start template creation flow."""
     await state.set_state(TemplateCreation.waiting_for_name)
     await query.message.edit_text(
-        "📝 Create New Template\n\n"
-        "What should be the template name?\n"
-        "(2–64 characters, unique)",
+        "📝 Новый шаблон\n\n"
+        "Введите уникальное название шаблона (2–64 символа):",
         reply_markup=get_template_creation_keyboard(),
     )
     await query.answer()
@@ -121,18 +116,18 @@ async def process_template_name(message: Message, state: FSMContext):
     name = message.text.strip()
 
     if not name or len(name) < 2:
-        await message.answer("❌ Template name must be at least 2 characters long. Try again:")
+        await message.answer("❌ Название должно содержать минимум 2 символа:")
         return
 
     if len(name) > 64:
-        await message.answer("❌ Template name must be 64 characters or less. Try again:")
+        await message.answer("❌ Название не должно превышать 64 символа:")
         return
 
     session = get_session()
     try:
         if get_template_by_name(session, name):
             await message.answer(
-                "❌ A template with this name already exists. Try a different name:"
+                "❌ Шаблон с таким названием уже существует. Введите другое:"
             )
             return
     finally:
@@ -141,9 +136,8 @@ async def process_template_name(message: Message, state: FSMContext):
     await state.update_data(name=name)
     await state.set_state(TemplateCreation.waiting_for_text)
     await message.answer(
-        f"✅ Template name: {name}\n\n"
-        "What should be the template text?\n"
-        "(5–4096 characters)"
+        f"✅ Название: {name}\n\n"
+        "Введите текст шаблона (5–4096 символов):"
     )
 
 
@@ -153,11 +147,11 @@ async def process_template_text(message: Message, state: FSMContext):
     text = message.text.strip()
 
     if not text or len(text) < 5:
-        await message.answer("❌ Template text must be at least 5 characters long. Try again:")
+        await message.answer("❌ Текст должен содержать минимум 5 символов:")
         return
 
     if len(text) > 4096:
-        await message.answer("❌ Template text must be 4096 characters or less. Try again:")
+        await message.answer("❌ Текст не должен превышать 4096 символов:")
         return
 
     data = await state.get_data()
@@ -166,10 +160,10 @@ async def process_template_text(message: Message, state: FSMContext):
     text_preview = get_template_preview(text, max_length=80)
 
     confirmation_text = (
-        "📋 Confirm Template\n\n"
-        f"Name: {name}\n\n"
-        f"Text:\n{text_preview}\n\n"
-        "Is this correct?"
+        "📋 Проверьте шаблон\n\n"
+        f"Название: {name}\n\n"
+        f"Текст:\n{text_preview}\n\n"
+        "Всё верно?"
     )
 
     await state.update_data(text=text)
@@ -192,16 +186,16 @@ async def confirm_template_creation(query: CallbackQuery, state: FSMContext):
 
         await state.clear()
         await query.message.edit_text(
-            f"✅ Template Created!\n\n"
+            f"✅ Шаблон создан\n\n"
             f"📝 {template.name}\n"
-            f"✅ Ready to use\n\n"
-            f"You can now assign this template to chats.",
+            "✅ Готов к использованию\n\n"
+            "Теперь шаблон можно назначить чатам.",
             reply_markup=get_templates_menu(),
         )
     except Exception as e:
         logger.error(f"Error creating template: {e}", exc_info=True)
         await query.message.edit_text(
-            f"❌ Error creating template: {str(e)}",
+            "❌ Не удалось создать шаблон.",
             reply_markup=get_templates_menu(),
         )
     finally:
@@ -219,16 +213,15 @@ async def callback_edit_template_name_start(query: CallbackQuery, state: FSMCont
     try:
         template = get_template(session, template_id)
         if not template:
-            await query.answer("❌ Template not found", show_alert=True)
+            await query.answer("❌ Шаблон не найден", show_alert=True)
             return
 
         await state.set_state(TemplateEdit.editing_name)
         await state.update_data(template_id=template_id, old_name=template.name)
         await query.message.edit_text(
-            f"📝 Edit Template Name\n\n"
-            f"Current name: {template.name}\n\n"
-            f"What should be the new name?\n"
-            f"(2–64 characters)",
+            "📝 Изменение названия\n\n"
+            f"Текущее название: {template.name}\n\n"
+            "Введите новое название (2–64 символа):",
             reply_markup=get_template_creation_keyboard(),
         )
     finally:
@@ -242,35 +235,35 @@ async def process_new_template_name(message: Message, state: FSMContext):
     new_name = message.text.strip()
 
     if not new_name or len(new_name) < 2:
-        await message.answer("❌ Template name must be at least 2 characters long. Try again:")
+        await message.answer("❌ Название должно содержать минимум 2 символа:")
         return
 
     if len(new_name) > 64:
-        await message.answer("❌ Template name must be 64 characters or less. Try again:")
+        await message.answer("❌ Название не должно превышать 64 символа:")
         return
 
     data = await state.get_data()
     old_name = data["old_name"]
 
     if new_name == old_name:
-        await message.answer("⚠️ New name is the same as the old name. Try a different name:")
+        await message.answer("⚠️ Новое название совпадает с текущим. Введите другое:")
         return
 
     session = get_session()
     try:
         if template_name_exists(session, new_name, exclude_id=data["template_id"]):
             await message.answer(
-                "❌ A template with this name already exists. Try a different name:"
+                "❌ Шаблон с таким названием уже существует. Введите другое:"
             )
             return
     finally:
         session.close()
 
     confirmation_text = (
-        "📝 Confirm Name Change\n\n"
-        f"Old name: {old_name}\n"
-        f"New name: {new_name}\n\n"
-        "Is this correct?"
+        "📝 Подтвердите изменение\n\n"
+        f"Старое название: {old_name}\n"
+        f"Новое название: {new_name}\n\n"
+        "Сохранить?"
     )
 
     await state.update_data(new_name=new_name)
@@ -287,16 +280,15 @@ async def callback_edit_template_text_start(query: CallbackQuery, state: FSMCont
     try:
         template = get_template(session, template_id)
         if not template:
-            await query.answer("❌ Template not found", show_alert=True)
+            await query.answer("❌ Шаблон не найден", show_alert=True)
             return
 
         await state.set_state(TemplateEdit.editing_text)
         await state.update_data(template_id=template_id, old_text=template.text)
         await query.message.edit_text(
-            f"📝 Edit Template Text\n\n"
-            f"Current text:\n{template.text}\n\n"
-            f"What should be the new text?\n"
-            f"(5–4096 characters)",
+            "📝 Изменение текста\n\n"
+            f"Текущий текст:\n{template.text}\n\n"
+            "Введите новый текст (5–4096 символов):",
             reply_markup=get_template_creation_keyboard(),
         )
     finally:
@@ -310,26 +302,26 @@ async def process_new_template_text(message: Message, state: FSMContext):
     new_text = message.text.strip()
 
     if not new_text or len(new_text) < 5:
-        await message.answer("❌ Template text must be at least 5 characters long. Try again:")
+        await message.answer("❌ Текст должен содержать минимум 5 символов:")
         return
 
     if len(new_text) > 4096:
-        await message.answer("❌ Template text must be 4096 characters or less. Try again:")
+        await message.answer("❌ Текст не должен превышать 4096 символов:")
         return
 
     data = await state.get_data()
     old_text = data["old_text"]
 
     if new_text == old_text:
-        await message.answer("⚠️ New text is the same as the old text. Try different text:")
+        await message.answer("⚠️ Новый текст совпадает с текущим. Введите другой:")
         return
 
     text_preview = get_template_preview(new_text, max_length=80)
 
     confirmation_text = (
-        "📝 Confirm Text Change\n\n"
-        f"New text:\n{text_preview}\n\n"
-        "Is this correct?"
+        "📝 Подтвердите изменение\n\n"
+        f"Новый текст:\n{text_preview}\n\n"
+        "Сохранить?"
     )
 
     await state.update_data(new_text=new_text)
@@ -347,23 +339,23 @@ async def confirm_template_edit(query: CallbackQuery, state: FSMContext):
     try:
         if "new_name" in data:
             if not update_template_name(session, template_id, data["new_name"]):
-                await query.answer("❌ Failed to update template name", show_alert=True)
+                await query.answer("❌ Не удалось изменить название", show_alert=True)
                 return
 
         if "new_text" in data:
             if not update_template_text(session, template_id, data["new_text"]):
-                await query.answer("❌ Failed to update template text", show_alert=True)
+                await query.answer("❌ Не удалось изменить текст", show_alert=True)
                 return
 
         await state.clear()
-        await query.answer("✅ Template updated successfully")
+        await query.answer("✅ Шаблон обновлён")
 
         query.data = f"template_detail_{template_id}"
         await callback_template_detail(query)
 
     except Exception as e:
         logger.error(f"Error updating template: {e}", exc_info=True)
-        await query.answer(f"❌ Error: {str(e)}", show_alert=True)
+        await query.answer("❌ Не удалось обновить шаблон", show_alert=True)
     finally:
         session.close()
 
@@ -387,10 +379,10 @@ async def callback_disable_template(query: CallbackQuery):
 
     try:
         if disable_template(session, template_id):
-            await query.answer("✅ Template disabled")
+            await query.answer("✅ Шаблон отключён")
             await callback_template_detail(query)
         else:
-            await query.answer("❌ Failed to disable template", show_alert=True)
+            await query.answer("❌ Не удалось отключить шаблон", show_alert=True)
     finally:
         session.close()
 
@@ -403,10 +395,10 @@ async def callback_enable_template(query: CallbackQuery):
 
     try:
         if enable_template(session, template_id):
-            await query.answer("✅ Template enabled")
+            await query.answer("✅ Шаблон включён")
             await callback_template_detail(query)
         else:
-            await query.answer("❌ Failed to enable template", show_alert=True)
+            await query.answer("❌ Не удалось включить шаблон", show_alert=True)
     finally:
         session.close()
 

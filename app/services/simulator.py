@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from app.database.models import Chat, SendLog, AdvertisingAccount
+from app.database.models import Chat, AdvertisingAccount
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +17,8 @@ async def simulate_send(account: AdvertisingAccount, chat: Chat, template) -> di
         "success": True,
         "account_name": account.display_name,
         "chat_title": chat.title,
-        "template_name": template.name if template else "None",
-        "message": f"[SIMULATION] Would send '{template.name}' to {chat.title}",
+        "template_name": template.name if template else "не назначен",
+        "message": f"[СИМУЛЯЦИЯ] Шаблон «{template.name}» будет отправлен в {chat.title}",
     }
 
 
@@ -30,7 +30,7 @@ def simulate_next_send(session: Session) -> dict:
     chats = (
         session.query(Chat)
         .filter(
-            Chat.is_active == True,
+            Chat.is_active.is_(True),
             Chat.status == "active",
         )
         .all()
@@ -64,7 +64,7 @@ def simulate_next_send(session: Session) -> dict:
     if not next_candidate:
         return {
             "found": False,
-            "reason": "No eligible chats",
+            "reason": "Нет подходящих чатов",
         }
 
     chat = next_candidate["chat"]
@@ -75,7 +75,7 @@ def simulate_next_send(session: Session) -> dict:
         "would_send": next_candidate["would_send"],
         "account_name": chat.account.display_name,
         "chat_title": chat.title,
-        "template_name": chat.template.name if chat.template else "None",
+        "template_name": chat.template.name if chat.template else "не назначен",
         "next_time": next_candidate["time"],
         "time_remaining": time_diff,
         "cooldown": chat.cooldown_minutes,
@@ -85,12 +85,10 @@ def simulate_next_send(session: Session) -> dict:
 
 def simulate_campaign(session: Session) -> dict:
     """Simulate the entire campaign - check every chat."""
-    now = datetime.utcnow()
-
     # Get all active chats
     chats = (
         session.query(Chat)
-        .filter(Chat.is_active == True)
+        .filter(Chat.is_active.is_(True))
         .order_by(Chat.title)
         .all()
     )
@@ -107,16 +105,16 @@ def simulate_campaign(session: Session) -> dict:
         if chat.status == "paused":
             results["paused"].append({
                 "chat_title": chat.title,
-                "account_name": chat.account.display_name if chat.account else "Unknown",
-                "reason": "Chat paused",
+                "account_name": chat.account.display_name if chat.account else "неизвестно",
+                "reason": "Чат приостановлен",
             })
             continue
 
         if chat.status == "error":
             results["errors"].append({
                 "chat_title": chat.title,
-                "account_name": chat.account.display_name if chat.account else "Unknown",
-                "reason": "Chat in error state",
+                "account_name": chat.account.display_name if chat.account else "неизвестно",
+                "reason": "Чат находится в состоянии ошибки",
             })
             continue
 
@@ -124,7 +122,7 @@ def simulate_campaign(session: Session) -> dict:
         if not chat.account:
             results["errors"].append({
                 "chat_title": chat.title,
-                "reason": "Account missing",
+                "reason": "Аккаунт не найден",
             })
             continue
 
@@ -132,7 +130,7 @@ def simulate_campaign(session: Session) -> dict:
             results["errors"].append({
                 "chat_title": chat.title,
                 "account_name": chat.account.display_name,
-                "reason": "Account disabled",
+                "reason": "Аккаунт отключён",
             })
             continue
 
@@ -140,7 +138,7 @@ def simulate_campaign(session: Session) -> dict:
             results["errors"].append({
                 "chat_title": chat.title,
                 "account_name": chat.account.display_name,
-                "reason": "No template assigned",
+                "reason": "Шаблон не назначен",
             })
             continue
 
@@ -148,7 +146,7 @@ def simulate_campaign(session: Session) -> dict:
             results["errors"].append({
                 "chat_title": chat.title,
                 "account_name": chat.account.display_name,
-                "reason": "Template disabled",
+                "reason": "Шаблон отключён",
             })
             continue
 
@@ -156,7 +154,7 @@ def simulate_campaign(session: Session) -> dict:
             results["errors"].append({
                 "chat_title": chat.title,
                 "account_name": chat.account.display_name,
-                "reason": "Session not connected",
+                "reason": "Сессия не подключена",
             })
             continue
 
@@ -182,7 +180,7 @@ def preview_schedule(session: Session, limit: int = 20) -> list:
     chats = (
         session.query(Chat)
         .filter(
-            Chat.is_active == True,
+            Chat.is_active.is_(True),
             Chat.status == "active",
         )
         .all()
@@ -222,7 +220,7 @@ def preview_schedule(session: Session, limit: int = 20) -> list:
 def estimate_campaign_duration(sends: list) -> str:
     """Estimate how long campaign would take."""
     if not sends:
-        return "No sends scheduled"
+        return "отправок нет"
 
     first_time = sends[0]["time"]
     last_time = sends[-1]["time"] if len(sends) > 1 else first_time
@@ -232,45 +230,45 @@ def estimate_campaign_duration(sends: list) -> str:
 
     if hours < 1:
         minutes = int(duration.total_seconds() / 60)
-        return f"{minutes} minutes"
+        return f"{minutes} мин."
     elif hours < 24:
-        return f"{int(hours)} hours"
+        return f"{int(hours)} ч."
     else:
         days = hours / 24
-        return f"{days:.1f} days"
+        return f"{days:.1f} дн."
 
 
 def format_campaign_simulation(result: dict) -> str:
     """Format campaign simulation results for display."""
-    text = "🧪 Campaign Simulation\n\n"
+    text = "🧪 Симуляция кампании\n\n"
 
-    text += f"📊 Summary\n"
-    text += f"Total chats checked: {result['total']}\n"
-    text += f"✅ Would send: {result['would_send_count']}\n"
-    text += f"⏸️ Paused: {result['paused_count']}\n"
-    text += f"❌ Errors: {result['error_count']}\n\n"
+    text += "📊 Результат\n"
+    text += f"Проверено чатов: {result['total']}\n"
+    text += f"✅ Готовы к отправке: {result['would_send_count']}\n"
+    text += f"⏸️ На паузе: {result['paused_count']}\n"
+    text += f"❌ Ошибки: {result['error_count']}\n\n"
 
     if result["would_send"]:
-        text += f"✅ Ready to Send\n"
+        text += "✅ Готовы к отправке\n"
         for send in result["would_send"][:5]:
             text += f"  • {send['chat_title']} ({send['account_name']})\n"
         if len(result["would_send"]) > 5:
-            text += f"  ... and {len(result['would_send']) - 5} more\n"
+            text += f"  …и ещё {len(result['would_send']) - 5}\n"
         text += "\n"
 
     if result["paused"]:
-        text += f"⏸️ Paused Chats\n"
+        text += "⏸️ Чаты на паузе\n"
         for item in result["paused"][:3]:
             text += f"  • {item['chat_title']}\n"
         if len(result["paused"]) > 3:
-            text += f"  ... and {len(result['paused']) - 3} more\n"
+            text += f"  …и ещё {len(result['paused']) - 3}\n"
         text += "\n"
 
     if result["errors"]:
-        text += f"❌ Errors\n"
+        text += "❌ Ошибки\n"
         for item in result["errors"][:5]:
             text += f"  • {item['chat_title']}: {item['reason']}\n"
         if len(result["errors"]) > 5:
-            text += f"  ... and {len(result['errors']) - 5} more\n"
+            text += f"  …и ещё {len(result['errors']) - 5}\n"
 
     return text

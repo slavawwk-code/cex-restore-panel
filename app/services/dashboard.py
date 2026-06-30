@@ -16,11 +16,11 @@ def get_dashboard_stats(session: Session) -> dict:
     disabled_accounts = [a for a in all_accounts if a.status == "disabled"]
 
     # Chat stats
-    all_chats = session.query(Chat).filter(Chat.is_active == True).all()
+    all_chats = session.query(Chat).filter(Chat.is_active.is_(True)).all()
     active_chats = [c for c in all_chats if c.status == "active"]
     paused_chats = [c for c in all_chats if c.status == "paused"]
     error_chats = [c for c in all_chats if c.status == "error"]
-    disabled_chats = session.query(Chat).filter(Chat.is_active == False).count()
+    disabled_chats = session.query(Chat).filter(Chat.is_active.is_(False)).count()
 
     # Template stats
     all_templates = session.query(Template).all()
@@ -30,8 +30,8 @@ def get_dashboard_stats(session: Session) -> dict:
     # Send stats
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     today_logs = session.query(SendLog).filter(SendLog.sent_at >= today).all()
-    successful_today = [l for l in today_logs if l.status == "success"]
-    errors_today = [l for l in today_logs if l.status == "error"]
+    successful_today = [log for log in today_logs if log.status == "success"]
+    errors_today = [log for log in today_logs if log.status == "error"]
 
     # Last sends
     all_logs = session.query(SendLog).order_by(SendLog.sent_at.desc()).all()
@@ -65,6 +65,16 @@ def get_dashboard_stats(session: Session) -> dict:
             "active": len(active_templates),
             "disabled": len(disabled_templates),
         },
+        "proxy": {
+            "online": sum(
+                account.proxy_enabled and account.proxy_status == "working"
+                for account in all_accounts
+            ),
+            "offline": sum(
+                account.proxy_enabled and account.proxy_status != "working"
+                for account in all_accounts
+            ),
+        },
         "sends": {
             "today": len(successful_today),
             "errors_today": len(errors_today),
@@ -82,7 +92,7 @@ def get_next_scheduled_sends(session: Session, limit: int = 10) -> list:
     chats = (
         session.query(Chat)
         .filter(
-            Chat.is_active == True,
+            Chat.is_active.is_(True),
             Chat.status == "active",
         )
         .all()
@@ -125,7 +135,7 @@ def get_next_scheduled_sends(session: Session, limit: int = 10) -> list:
 def format_next_sends_list(sends: list) -> str:
     """Format next sends for display."""
     if not sends:
-        return "No scheduled sends coming up"
+        return "Ближайших отправок нет"
 
     now = datetime.utcnow()
     text = ""
@@ -138,13 +148,13 @@ def format_next_sends_list(sends: list) -> str:
         status = "⏲️" if send["is_overdue"] else "⏰"
 
         if send["is_overdue"]:
-            time_str = "NOW"
+            time_str = "сейчас"
         elif hours == 0:
-            time_str = f"in {minutes}m"
+            time_str = f"через {minutes} мин."
         elif hours < 24:
-            time_str = f"in {hours}h {minutes}m"
+            time_str = f"через {hours} ч. {minutes} мин."
         else:
-            time_str = send["next_send_time"].strftime("%Y-%m-%d %H:%M")
+            time_str = send["next_send_time"].strftime("%d.%m.%Y %H:%M")
 
         text += f"{i}. {status} {send['chat_title']}\n"
         text += f"   📱 {send['account_name']} • 📝 {send['template_name']}\n"

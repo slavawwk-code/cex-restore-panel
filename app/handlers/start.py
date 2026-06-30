@@ -25,9 +25,9 @@ async def cmd_start(message: Message):
             session.commit()
 
         await message.answer(
-            "🤖 Welcome to Cex Restore Panel!\n\n"
-            "Select an option from the menu below:",
+            "<b>Cex Restore Panel</b>\n\nВыберите раздел.",
             reply_markup=get_main_menu(),
+            parse_mode="HTML",
         )
     finally:
         session.close()
@@ -37,7 +37,19 @@ async def cmd_start(message: Message):
 async def callback_main_menu(query: CallbackQuery):
     """Back to main menu."""
     await query.message.edit_text(
-        "🤖 Main Menu\n\nSelect an option:",
+        "<b>Cex Restore Panel</b>\n\nВыберите раздел.",
+        reply_markup=get_main_menu(),
+        parse_mode="HTML",
+    )
+    await query.answer()
+
+
+@router.callback_query(F.data.in_({"operators_menu", "settings_menu"}))
+async def callback_unavailable_section(query: CallbackQuery):
+    """Explain unavailable menu sections instead of ignoring the callback."""
+    section = "Операторы" if query.data == "operators_menu" else "Настройки"
+    await query.message.edit_text(
+        f"Раздел «{section}» пока не реализован.",
         reply_markup=get_main_menu(),
     )
     await query.answer()

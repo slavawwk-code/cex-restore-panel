@@ -5,12 +5,12 @@ def get_validator_menu() -> InlineKeyboardMarkup:
     """Validator main menu."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🔍 Validate Campaign", callback_data="validator_validate")],
-            [InlineKeyboardButton(text="🧪 Simulate Next Send", callback_data="simulator_next")],
-            [InlineKeyboardButton(text="📋 Simulate Full Campaign", callback_data="simulator_full")],
-            [InlineKeyboardButton(text="💪 Health Check", callback_data="validator_health")],
-            [InlineKeyboardButton(text="📅 Preview Schedule", callback_data="simulator_schedule")],
-            [InlineKeyboardButton(text="⬅️ Back", callback_data="main_menu")],
+            [InlineKeyboardButton(text="🔍 Проверить кампанию", callback_data="validator_validate")],
+            [InlineKeyboardButton(text="Следующая отправка", callback_data="simulator_next")],
+            [InlineKeyboardButton(text="Симуляция кампании", callback_data="simulator_full")],
+            [InlineKeyboardButton(text="💪 Проверка системы", callback_data="validator_health")],
+            [InlineKeyboardButton(text="📅 Предпросмотр расписания", callback_data="simulator_schedule")],
+            [InlineKeyboardButton(text="Назад", callback_data="main_menu")],
         ]
     )
 
@@ -19,6 +19,6 @@ def get_validator_back_keyboard() -> InlineKeyboardMarkup:
     """Back button for validator."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Back", callback_data="campaigns_menu")],
+            [InlineKeyboardButton(text="Назад", callback_data="validator_menu")],
         ]
     )

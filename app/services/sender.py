@@ -1,9 +1,9 @@
 import logging
-import os
 from datetime import datetime
 from sqlalchemy.orm import Session
 from app.database.models import AdvertisingAccount, Chat, Template, SendLog
 from app.telethon.client import TelethonClientManager
+from app.config import load_settings
 from telethon.errors import (
     FloodWaitError,
     ChatWriteForbiddenError,
@@ -17,7 +17,7 @@ from telethon.errors import (
 
 logger = logging.getLogger(__name__)
 
-DRY_RUN = os.getenv("DRY_RUN", "True").lower() == "true"
+DRY_RUN = load_settings(require_secrets=False).dry_run
 telethon_manager = TelethonClientManager()
 
 
@@ -28,35 +28,40 @@ async def can_send_chat(account: AdvertisingAccount, chat: Chat, template: Templ
     """
     # Check account
     if not account:
-        return False, "Account not found"
+        return False, "Аккаунт не найден"
     if account.status != "active":
-        return False, f"Account status is {account.status}, not active"
+        status_label = {
+            "paused": "на паузе",
+            "warming": "на прогреве",
+            "disabled": "отключён",
+        }.get(account.status, "неактивен")
+        return False, f"Аккаунт {status_label}"
     if not account.session_connected:
-        return False, "Account session not connected"
+        return False, "Сессия аккаунта не подключена"
 
     # Check chat
     if not chat.is_active:
-        return False, "Chat is disabled"
+        return False, "Чат отключён"
     if chat.status == "paused":
-        return False, "Chat is paused"
+        return False, "Чат приостановлен"
     if chat.status == "error":
-        return False, "Chat has error status"
+        return False, "Чат находится в состоянии ошибки"
 
     # Check template
     if not template:
-        return False, "Template not assigned"
+        return False, "Шаблон не назначен"
     if not template.is_active:
-        return False, "Template is disabled"
+        return False, "Шаблон отключён"
 
     # Check cooldown
     if chat.cooldown_minutes < 1 or chat.cooldown_minutes > 1440:
-        return False, "Chat cooldown is invalid"
+        return False, "Указан неверный интервал отправки"
 
     # Check if cooldown expired
     if chat.last_sent_at:
         elapsed = (datetime.utcnow() - chat.last_sent_at).total_seconds() / 60
         if elapsed < chat.cooldown_minutes:
-            return False, f"Cooldown not expired ({int(chat.cooldown_minutes - elapsed)}m remaining)"
+            return False, f"Интервал ещё не истёк: {int(chat.cooldown_minutes - elapsed)} мин."
 
     return True, "OK"
 
@@ -91,17 +96,17 @@ async def real_send(
     try:
         # Verify session is still connected
         if not account.session_connected:
-            raise UnauthorizedError("Account session not connected")
+            raise UnauthorizedError("Сессия аккаунта не подключена")
 
         # Get Telethon client
-        client = await telethon_manager.get_client(account.telethon_session)
+        client = await telethon_manager.get_client(account)
 
         if not client.is_connected():
             await client.connect()
 
         # Verify still authorized
         if not await client.is_user_authorized():
-            raise UnauthorizedError("Client not authorized")
+            raise UnauthorizedError("Клиент Telegram не авторизован")
 
         # Send message
         try:
@@ -124,37 +129,37 @@ async def real_send(
             }
 
         except FloodWaitError as e:
-            error_msg = f"Flood wait: {e.seconds}s required"
+            error_msg = f"Лимит Telegram: повторите через {e.seconds} сек."
             logger.warning(f"Flood error for chat {chat.id}: {error_msg}")
             raise Exception(error_msg)
 
         except SlowModeWaitError as e:
-            error_msg = f"Slow mode: wait {e.seconds}s"
+            error_msg = f"Медленный режим чата: подождите {e.seconds} сек."
             logger.warning(f"Slow mode error for chat {chat.id}: {error_msg}")
             raise Exception(error_msg)
 
         except ChatWriteForbiddenError:
-            error_msg = "Chat write forbidden (no permission)"
+            error_msg = "Нет разрешения на отправку сообщений в чат"
             logger.warning(f"Write forbidden in chat {chat.id}")
             raise Exception(error_msg)
 
         except UserBannedInChannelError:
-            error_msg = "User banned from chat"
+            error_msg = "Аккаунт заблокирован в чате"
             logger.warning(f"Account {account.id} banned from chat {chat.id}")
             raise Exception(error_msg)
 
         except ChannelPrivateError:
-            error_msg = "Chat is private or no access"
+            error_msg = "Чат закрыт или недоступен аккаунту"
             logger.warning(f"Access denied to chat {chat.id}")
             raise Exception(error_msg)
 
         except PeerIdInvalidError:
-            error_msg = "Invalid chat ID/username"
+            error_msg = "Неверный ID или username чата"
             logger.warning(f"Invalid chat identifier: {chat.username_or_chat_id}")
             raise Exception(error_msg)
 
         except RPCError as e:
-            error_msg = f"Telegram error: {str(e)}"
+            error_msg = f"Ошибка Telegram: {type(e).__name__}"
             logger.error(f"RPC error in chat {chat.id}: {error_msg}")
             raise Exception(error_msg)
 
@@ -215,7 +220,7 @@ async def send_message(
             "account_id": account.id if account else -1,
             "chat_id": chat.id if chat else -1,
             "template_id": template.id if template else None,
-            "error_message": "Account or chat not found",
+            "error_message": "Аккаунт или чат не найден",
         }
 
     # Check if we can send (re-check to catch any race conditions)
@@ -277,11 +282,11 @@ async def send_message(
 def format_send_result(result: dict) -> str:
     """Format send result for display."""
     if result["mode"] == "SKIPPED":
-        return f"⏭️ Skipped: {result.get('error_message', 'Unknown reason')}"
+        return f"⏭️ Пропущено: {result.get('error_message', 'причина неизвестна')}"
 
     if result["success"]:
-        mode_text = "📤 REAL" if result["mode"] == "REAL" else "📋 SIMULATION"
-        return f"{mode_text} - Sent successfully"
+        mode_text = "📤 РЕАЛЬНАЯ" if result["mode"] == "REAL" else "📋 СИМУЛЯЦИЯ"
+        return f"{mode_text} — успешно"
 
-    mode_text = "❌ REAL" if result["mode"] == "REAL" else "❌ SIMULATION"
-    return f"{mode_text} - Error: {result.get('error_message', 'Unknown')}"
+    mode_text = "❌ РЕАЛЬНАЯ" if result["mode"] == "REAL" else "❌ СИМУЛЯЦИЯ"
+    return f"{mode_text} — ошибка: {result.get('error_message', 'неизвестно')}"

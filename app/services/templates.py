@@ -25,7 +25,7 @@ def list_templates(session: Session, include_inactive: bool = False) -> list[Tem
     """Get all templates."""
     query = session.query(Template)
     if not include_inactive:
-        query = query.filter(Template.is_active == True)
+        query = query.filter(Template.is_active.is_(True))
     return query.all()
 
 

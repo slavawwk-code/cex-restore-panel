@@ -5,58 +5,95 @@ def get_accounts_menu() -> InlineKeyboardMarkup:
     """Accounts management menu."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Add Account", callback_data="account_add")],
-            [InlineKeyboardButton(text="📋 View Accounts", callback_data="accounts_view")],
-            [InlineKeyboardButton(text="⬅️ Back", callback_data="main_menu")],
+            [InlineKeyboardButton(text="Добавить аккаунт", callback_data="account_add")],
+            [InlineKeyboardButton(text="Список аккаунтов", callback_data="accounts_view")],
+            [InlineKeyboardButton(text="Назад", callback_data="main_menu")],
         ]
     )
 
 
-def get_accounts_list_keyboard(accounts: list) -> InlineKeyboardMarkup:
+def get_accounts_list_keyboard(
+    accounts: list, health_scores: dict[int, int] | None = None
+) -> InlineKeyboardMarkup:
     """Keyboard for listing accounts."""
     buttons = []
     for account in accounts:
-        btn_text = f"{account.display_name} ({account.status})"
+        score = (health_scores or {}).get(account.id)
+        indicator = "🟢" if score is not None and score >= 90 else "🟡" if score is not None and score >= 60 else "🔴"
+        btn_text = f"{indicator} {account.display_name} · {score}%" if score is not None else account.display_name
         buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"account_detail_{account.id}")])
 
-    buttons.append([InlineKeyboardButton(text="➕ Add New Account", callback_data="account_add")])
-    buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data="accounts_list")])
+    buttons.append([InlineKeyboardButton(text="Добавить аккаунт", callback_data="account_add")])
+    buttons.append([InlineKeyboardButton(text="Назад", callback_data="accounts_list")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def get_account_detail_keyboard(account_id: int, status: str, session_connected: bool = False) -> InlineKeyboardMarkup:
     """Keyboard for account detail view."""
-    buttons = []
-
-    if status == "active":
-        buttons.append([InlineKeyboardButton(text="⏸️ Pause", callback_data=f"account_pause_{account_id}")])
-    elif status == "paused":
-        buttons.append([InlineKeyboardButton(text="▶️ Resume", callback_data=f"account_resume_{account_id}")])
-    elif status == "warming":
-        buttons.append([InlineKeyboardButton(text="✅ Activate", callback_data=f"account_activate_{account_id}")])
-
-    # Telegram session buttons
-    if session_connected:
-        buttons.append([InlineKeyboardButton(text="✅ Check Session Status", callback_data=f"auth_check_status_{account_id}")])
-        buttons.append([InlineKeyboardButton(text="🚫 Disconnect Session", callback_data=f"auth_disconnect_{account_id}")])
-    else:
-        buttons.append([InlineKeyboardButton(text="🔗 Connect Telegram Session", callback_data=f"auth_connect_{account_id}")])
-
-    buttons.append([InlineKeyboardButton(text="🔄 Set to Warming", callback_data=f"account_warming_{account_id}")])
-    buttons.append([InlineKeyboardButton(text="💬 View Chats", callback_data=f"account_chats_{account_id}")])
-
-    if status != "disabled":
-        buttons.append([InlineKeyboardButton(text="🚫 Disable Account", callback_data=f"account_disable_{account_id}")])
-
-    buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data="accounts_view")])
+    telegram_callback = (
+        f"auth_check_status_{account_id}"
+        if session_connected
+        else f"auth_connect_{account_id}"
+    )
+    buttons = [
+        [
+            InlineKeyboardButton(text="Telegram", callback_data=telegram_callback),
+            InlineKeyboardButton(text="Прокси", callback_data=f"proxy_menu_{account_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="Чаты", callback_data=f"account_chats_{account_id}"),
+            InlineKeyboardButton(text="Health", callback_data=f"account_health_{account_id}"),
+        ],
+        [InlineKeyboardButton(text="Настройки", callback_data=f"account_settings_{account_id}")],
+        [InlineKeyboardButton(text="Назад", callback_data="accounts_view")],
+    ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_account_settings_keyboard(
+    account_id: int, status: str, session_connected: bool
+) -> InlineKeyboardMarkup:
+    """Account state controls ordered as primary, secondary, danger, back."""
+    buttons = []
+    if status in {"paused", "warming"}:
+        buttons.append(
+            [InlineKeyboardButton(text="Активировать", callback_data=f"account_activate_{account_id}")]
+        )
+    elif status == "active":
+        buttons.append(
+            [InlineKeyboardButton(text="Приостановить", callback_data=f"account_pause_{account_id}")]
+        )
+    if status != "warming":
+        buttons.append(
+            [InlineKeyboardButton(text="Перевести на прогрев", callback_data=f"account_warming_{account_id}")]
+        )
+    if session_connected:
+        buttons.append(
+            [InlineKeyboardButton(text="Отключить Telegram", callback_data=f"auth_disconnect_{account_id}")]
+        )
+    if status != "disabled":
+        buttons.append(
+            [InlineKeyboardButton(text="Отключить аккаунт", callback_data=f"account_disable_{account_id}")]
+        )
+    buttons.append(
+        [InlineKeyboardButton(text="Назад", callback_data=f"account_detail_{account_id}")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_account_subpage_keyboard(account_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Назад", callback_data=f"account_detail_{account_id}")]
+        ]
+    )
 
 
 def get_account_creation_keyboard() -> InlineKeyboardMarkup:
     """Keyboard for account creation flow (cancel button)."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Cancel", callback_data="accounts_list")],
+            [InlineKeyboardButton(text="Отмена", callback_data="accounts_list")],
         ]
     )
 
@@ -65,7 +102,7 @@ def get_account_confirmation_keyboard(account_id: int = None) -> InlineKeyboardM
     """Keyboard for confirming account creation."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Confirm", callback_data=f"account_confirm_{account_id or 'new'}")],
-            [InlineKeyboardButton(text="❌ Cancel", callback_data="accounts_list")],
+            [InlineKeyboardButton(text="Подтвердить", callback_data=f"account_confirm_{account_id or 'new'}")],
+            [InlineKeyboardButton(text="Отмена", callback_data="accounts_list")],
         ]
     )

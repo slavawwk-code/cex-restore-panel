@@ -1,0 +1,24 @@
+# Replace cexrestore and /opt/cex-restore-panel if you deploy under another user/path.
+# Install manually: sudo cp deployment/systemd/cex-restore.service /etc/systemd/system/
+[Unit]
+Description=Cex Restore Panel Telegram Bot
+Documentation=file:/opt/cex-restore-panel/DEPLOY.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=cexrestore
+Group=cexrestore
+WorkingDirectory=/opt/cex-restore-panel
+EnvironmentFile=/opt/cex-restore-panel/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/opt/cex-restore-panel/.venv/bin/python /opt/cex-restore-panel/scripts/smoke_test.py
+ExecStart=/opt/cex-restore-panel/.venv/bin/python /opt/cex-restore-panel/main.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

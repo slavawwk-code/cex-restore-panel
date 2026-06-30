@@ -1,29 +1,37 @@
 import logging
-import asyncio
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from app.states import TelethonAuth
+from aiogram.types import CallbackQuery, Message
+from telethon.errors import SessionPasswordNeededError
+
+from app.database import get_session
+from app.database.models import AdvertisingAccount
 from app.keyboards.telethon_auth import (
     get_auth_confirmation_keyboard,
     get_code_input_cancel_keyboard,
     get_disconnect_confirmation_keyboard,
 )
-from app.database import get_session
-from app.database.models import AdvertisingAccount
 from app.services.telethon_auth import (
+    TelethonAuthError,
+    check_session_status,
+    disconnect_session,
     send_login_code,
     sign_in_with_code,
     sign_in_with_password,
-    check_session_status,
-    disconnect_session,
-    get_session_info,
-    TelethonAuthError,
 )
-from telethon.errors import SessionPasswordNeededError
+from app.states import TelethonAuth
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+
+def _get_account(session, account_id: int) -> AdvertisingAccount | None:
+    return (
+        session.query(AdvertisingAccount)
+        .filter(AdvertisingAccount.id == account_id)
+        .first()
+    )
 
 
 @router.callback_query(F.data.startswith("auth_connect_"))
@@ -31,29 +39,33 @@ async def callback_auth_connect(query: CallbackQuery, state: FSMContext):
     """Start authentication flow."""
     account_id = int(query.data.split("_")[-1])
     session = get_session()
-
     try:
-        account = session.query(AdvertisingAccount).filter(AdvertisingAccount.id == account_id).first()
+        account = _get_account(session, account_id)
         if not account:
-            await query.answer("❌ Account not found", show_alert=True)
+            await query.answer("❌ Аккаунт не найден", show_alert=True)
             return
-
         if not account.phone_number:
             await query.message.edit_text(
-                "❌ No phone number configured for this account.\n\n"
-                "Please set the phone number first.",
+                "❌ Для аккаунта не указан номер телефона."
             )
             await query.answer()
             return
 
         await state.set_state(TelethonAuth.confirming_phone)
-        await state.update_data(account_id=account_id, phone_number=account.phone_number)
-
+        await state.update_data(
+            account_id=account_id, phone_number=account.phone_number
+        )
+        route = (
+            f"через {account.proxy_type}-прокси {account.proxy_host}:{account.proxy_port}"
+            if account.proxy_enabled
+            else "напрямую, без прокси"
+        )
         await query.message.edit_text(
-            f"🔗 Connect Telegram Session\n\n"
-            f"Phone: {account.phone_number}\n\n"
-            f"A login code will be sent to your Telegram app.\n"
-            f"Make sure you have access to it.",
+            "🔗 Подключение Telegram-аккаунта\n\n"
+            f"Номер: {account.phone_number}\n"
+            f"Соединение: {route}\n\n"
+            "Telegram сам выберет способ доставки кода. Обычно код приходит "
+            "служебным сообщением в официальное приложение Telegram.",
             reply_markup=get_auth_confirmation_keyboard(account_id),
         )
     finally:
@@ -63,35 +75,54 @@ async def callback_auth_connect(query: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("auth_send_code_"))
 async def callback_auth_send_code(query: CallbackQuery, state: FSMContext):
-    """Send login code."""
+    """Request a login code and report Telegram's delivery channel."""
     account_id = int(query.data.split("_")[-1])
     session = get_session()
-
     try:
-        account = session.query(AdvertisingAccount).filter(AdvertisingAccount.id == account_id).first()
+        account = _get_account(session, account_id)
         if not account:
-            await query.answer("❌ Account not found", show_alert=True)
+            await query.answer("❌ Аккаунт не найден", show_alert=True)
             return
 
-        await query.message.edit_text("⏳ Sending login code to Telegram...")
-
+        await query.message.edit_text("⏳ Запрашиваем код у Telegram…")
         try:
-            phone_code_hash = await send_login_code(account)
-            await state.update_data(phone_code_hash=phone_code_hash)
-            await state.set_state(TelethonAuth.waiting_for_code)
-
+            result = await send_login_code(account)
+            if result["already_authorized"]:
+                await check_session_status(session, account)
+                account.last_error = None
+                session.commit()
+                await state.clear()
+                await query.message.edit_text(
+                    "✅ Сохранённая сессия уже авторизована.\n\n"
+                    "Telegram-аккаунт подключён, новый код не требуется.",
+                    reply_markup=get_code_input_cancel_keyboard(account_id),
+                )
+            else:
+                await state.update_data(
+                    phone_code_hash=result["phone_code_hash"],
+                    delivery=result["delivery"],
+                )
+                await state.set_state(TelethonAuth.waiting_for_code)
+                timeout_text = (
+                    f" Код действует около {result['timeout']} сек."
+                    if result.get("timeout")
+                    else ""
+                )
+                await query.message.edit_text(
+                    "✅ Telegram принял запрос.\n\n"
+                    f"Код отправлен {result['delivery']}.{timeout_text}\n"
+                    "Введите полученный код цифрами без лишнего текста.",
+                    reply_markup=get_code_input_cancel_keyboard(account_id),
+                )
+        except TelethonAuthError as error:
+            account.last_error = str(error)
+            session.commit()
+            await state.clear()
             await query.message.edit_text(
-                "✅ Code sent to your Telegram app!\n\n"
-                "Enter the 5-digit code below:\n"
-                "(Check your Telegram account for the code)",
+                f"❌ Не удалось получить код\n\n{error}\n\n"
+                "Проверьте номер телефона, сеть и настройки прокси.",
                 reply_markup=get_code_input_cancel_keyboard(account_id),
             )
-        except TelethonAuthError as e:
-            await query.message.edit_text(
-                f"❌ Failed to send code\n\n{str(e)}\n\n"
-                f"Please check your phone number and try again.",
-            )
-            await state.clear()
     finally:
         session.close()
     await query.answer()
@@ -100,140 +131,118 @@ async def callback_auth_send_code(query: CallbackQuery, state: FSMContext):
 @router.message(TelethonAuth.waiting_for_code)
 async def process_login_code(message: Message, state: FSMContext):
     """Process login code input."""
-    code = message.text.strip()
-
-    if not code or len(code) < 4:
-        await message.answer("❌ Invalid code format. Please enter the 5-digit code:")
+    code = (message.text or "").replace(" ", "").replace("-", "")
+    if not code.isdigit() or len(code) not in {4, 5, 6}:
+        await message.answer("❌ Введите код из 4–6 цифр без другого текста:")
         return
 
     data = await state.get_data()
     account_id = data["account_id"]
-    phone_code_hash = data["phone_code_hash"]
-
     session = get_session()
-
     try:
-        account = session.query(AdvertisingAccount).filter(AdvertisingAccount.id == account_id).first()
+        account = _get_account(session, account_id)
         if not account:
-            await message.answer("❌ Account not found")
+            await message.answer("❌ Аккаунт не найден")
             await state.clear()
             return
 
-        await message.answer("⏳ Verifying code...")
-
+        await message.answer("⏳ Проверяем код…")
         try:
-            await sign_in_with_code(account, code, phone_code_hash)
-
-            # Success - update database
-            account.session_connected = True
-            account.session_connected_at = None  # Will be set on first status check
+            await sign_in_with_code(account, code, data["phone_code_hash"])
+            await check_session_status(session, account)
             account.last_error = None
             session.commit()
-
             await state.clear()
             await message.answer(
-                "✅ Session connected successfully!\n\n"
-                "Your Telegram account is now linked to this advertising account."
+                "✅ Telegram-аккаунт успешно подключён.\n\n"
+                "Сессия сохранена и готова к работе."
             )
-            logger.info(f"Account {account_id} authenticated successfully")
-
+            logger.info("Account %s authenticated successfully", account_id)
         except SessionPasswordNeededError:
-            # 2FA required
             await state.set_state(TelethonAuth.waiting_for_password)
             await message.answer(
-                "🔐 Two-Factor Authentication Required\n\n"
-                "Enter your 2FA password:"
+                "🔐 На аккаунте включена двухэтапная аутентификация.\n\n"
+                "Введите облачный пароль Telegram:"
             )
-
-        except TelethonAuthError as e:
-            await message.answer(f"❌ {str(e)}\n\nPlease try again.")
-
+        except TelethonAuthError as error:
+            account.last_error = str(error)
+            session.commit()
+            await message.answer(f"❌ {error}\n\nПопробуйте ещё раз.")
     finally:
         session.close()
 
 
 @router.message(TelethonAuth.waiting_for_password)
 async def process_2fa_password(message: Message, state: FSMContext):
-    """Process 2FA password input."""
-    password = message.text.strip()
-
+    """Process 2FA password without logging or retaining it in bot messages."""
+    password = message.text or ""
     if not password:
-        await message.answer("❌ Password cannot be empty:")
+        await message.answer("❌ Пароль не может быть пустым:")
         return
+
+    try:
+        await message.delete()
+    except Exception:
+        logger.warning("Could not delete operator message containing 2FA password")
 
     data = await state.get_data()
     account_id = data["account_id"]
-
     session = get_session()
-
     try:
-        account = session.query(AdvertisingAccount).filter(AdvertisingAccount.id == account_id).first()
+        account = _get_account(session, account_id)
         if not account:
-            await message.answer("❌ Account not found")
+            await message.answer("❌ Аккаунт не найден")
             await state.clear()
             return
 
-        await message.answer("⏳ Verifying password...")
-
+        await message.answer("⏳ Проверяем пароль…")
         try:
             await sign_in_with_password(account, password)
-
-            # Success - update database
-            account.session_connected = True
-            account.session_connected_at = None
+            await check_session_status(session, account)
             account.last_error = None
             session.commit()
-
             await state.clear()
             await message.answer(
-                "✅ Two-Factor Authentication successful!\n\n"
-                "Your Telegram account is now linked."
+                "✅ Двухэтапная аутентификация пройдена.\n\n"
+                "Telegram-аккаунт успешно подключён."
             )
-            logger.info(f"Account {account_id} 2FA authenticated successfully")
-
-        except TelethonAuthError as e:
-            await message.answer(f"❌ {str(e)}\n\nPlease try again.")
-
+            logger.info("Account %s 2FA authenticated successfully", account_id)
+        except TelethonAuthError as error:
+            account.last_error = str(error)
+            session.commit()
+            await message.answer(f"❌ {error}\n\nПопробуйте ещё раз.")
     finally:
+        password = ""
         session.close()
 
 
 @router.callback_query(F.data.startswith("auth_check_status_"))
 async def callback_auth_check_status(query: CallbackQuery):
-    """Check session status."""
+    """Check and display session status."""
     account_id = int(query.data.split("_")[-1])
     session = get_session()
-
     try:
-        account = session.query(AdvertisingAccount).filter(AdvertisingAccount.id == account_id).first()
+        account = _get_account(session, account_id)
         if not account:
-            await query.answer("❌ Account not found", show_alert=True)
+            await query.answer("❌ Аккаунт не найден", show_alert=True)
             return
 
-        await query.message.edit_text("⏳ Checking session status...")
-
+        await query.message.edit_text("⏳ Проверяем сессию Telegram…")
         status = await check_session_status(session, account)
-
         if status["connected"]:
             text = (
-                f"✅ Session Connected\n\n"
-                f"📱 Telegram User: {status.get('username') or status.get('user_id')}\n"
-                f"🆔 User ID: {status.get('user_id')}\n"
-                f"✅ Status: Active"
+                "✅ Сессия подключена\n\n"
+                f"Пользователь: {status.get('username') or status.get('user_id')}\n"
+                f"ID: {status.get('user_id')}"
             )
         else:
             text = (
-                f"❌ Session Not Connected\n\n"
-                f"Reason: {status.get('reason', 'Unknown')}\n\n"
-                f"Please reconnect or check the session."
+                "❌ Сессия не подключена\n\n"
+                f"Причина: {status.get('reason', 'неизвестно')}"
             )
-
-        from app.handlers.accounts import callback_account_detail
-
-        query.data = f"account_detail_{account_id}"
-        # Show updated detail view
-        await callback_account_detail(query)
-
+        await query.message.edit_text(
+            text, reply_markup=get_code_input_cancel_keyboard(account_id)
+        )
     finally:
         session.close()
     await query.answer()
@@ -243,11 +252,9 @@ async def callback_auth_check_status(query: CallbackQuery):
 async def callback_auth_disconnect(query: CallbackQuery):
     """Confirm disconnect."""
     account_id = int(query.data.split("_")[-1])
-
     await query.message.edit_text(
-        "⚠️ Disconnect Session?\n\n"
-        "This will disconnect your Telegram account.\n"
-        "You can reconnect anytime.",
+        "⚠️ Отключить Telegram-сессию?\n\n"
+        "Локальный файл сессии будет удалён. Подключить аккаунт снова можно в любое время.",
         reply_markup=get_disconnect_confirmation_keyboard(account_id),
     )
     await query.answer()
@@ -258,26 +265,22 @@ async def callback_auth_confirm_disconnect(query: CallbackQuery):
     """Confirm and disconnect."""
     account_id = int(query.data.split("_")[-1])
     session = get_session()
-
     try:
-        account = session.query(AdvertisingAccount).filter(AdvertisingAccount.id == account_id).first()
+        account = _get_account(session, account_id)
         if not account:
-            await query.answer("❌ Account not found", show_alert=True)
+            await query.answer("❌ Аккаунт не найден", show_alert=True)
             return
-
-        await query.message.edit_text("⏳ Disconnecting...")
-
-        success = await disconnect_session(session, account, delete_file=True)
-
-        if success:
-            await query.answer("✅ Session disconnected")
-            # Reload account detail
-            from app.handlers.accounts import callback_account_detail
-
-            query.data = f"account_detail_{account_id}"
-            await callback_account_detail(query)
+        await query.message.edit_text("⏳ Отключаем сессию…")
+        if await disconnect_session(session, account, delete_file=True):
+            await query.message.edit_text(
+                "✅ Telegram-сессия отключена.",
+                reply_markup=get_code_input_cancel_keyboard(account_id),
+            )
         else:
-            await query.message.edit_text("❌ Failed to disconnect session")
-
+            await query.message.edit_text(
+                "❌ Не удалось отключить сессию.",
+                reply_markup=get_code_input_cancel_keyboard(account_id),
+            )
     finally:
         session.close()
+    await query.answer()

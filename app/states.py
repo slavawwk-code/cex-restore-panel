@@ -54,3 +54,15 @@ class TelethonAuth(StatesGroup):
     confirming_phone = State()
     waiting_for_code = State()
     waiting_for_password = State()
+
+
+class ProxySetup(StatesGroup):
+    """FSM states for per-account proxy configuration."""
+
+    entering_string = State()
+    selecting_type = State()
+    entering_host = State()
+    entering_port = State()
+    entering_username = State()
+    entering_password = State()
+    confirmation = State()
