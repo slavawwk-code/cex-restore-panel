@@ -20,7 +20,7 @@ from app.services.proxy import (
     save_detected_proxy,
     validate_proxy_settings,
 )
-from app.telethon.proxy import build_proxy
+from app.telethon.proxy import build_proxy, build_telethon_proxy_config
 
 
 class ProxyConfigurationTests(unittest.TestCase):
@@ -141,6 +141,13 @@ class ProxyConfigurationTests(unittest.TestCase):
                     parse_proxy_string(value)
 
     def test_supported_proxy_types_build_telethon_config(self):
+        from python_socks import ProxyType
+
+        expected_types = {
+            "SOCKS5": ProxyType.SOCKS5,
+            "SOCKS4": ProxyType.SOCKS4,
+            "HTTP": ProxyType.HTTP,
+        }
         for proxy_type in ("SOCKS5", "SOCKS4", "HTTP"):
             with self.subTest(proxy_type=proxy_type):
                 account = AdvertisingAccount(
@@ -152,9 +159,40 @@ class ProxyConfigurationTests(unittest.TestCase):
                     proxy_password="secret",
                 )
                 proxy = build_proxy(account)
-                self.assertEqual(proxy["proxy_type"], proxy_type.lower())
+                self.assertEqual(proxy["proxy_type"], expected_types[proxy_type])
                 self.assertEqual(proxy["addr"], "127.0.0.1")
                 self.assertEqual(proxy["port"], 1080)
+                self.assertTrue(proxy["rdns"])
+                self.assertEqual(proxy["username"], "operator")
+                self.assertEqual(proxy["password"], "secret")
+
+    def test_proxy_config_builder_returns_valid_telethon_object(self):
+        from python_socks import ProxyType
+
+        cases = {
+            "SOCKS5": ProxyType.SOCKS5,
+            "HTTP": ProxyType.HTTP,
+            "SOCKS4": ProxyType.SOCKS4,
+        }
+        for proxy_type, expected in cases.items():
+            with self.subTest(proxy_type=proxy_type):
+                proxy = build_telethon_proxy_config(
+                    proxy_type,
+                    "127.0.0.1",
+                    1080,
+                    "operator" if proxy_type != "SOCKS4" else None,
+                    "secret" if proxy_type != "SOCKS4" else None,
+                )
+                self.assertEqual(proxy["proxy_type"], expected)
+                self.assertEqual(proxy["addr"], "127.0.0.1")
+                self.assertEqual(proxy["port"], 1080)
+                self.assertTrue(proxy["rdns"])
+                if proxy_type == "SOCKS4":
+                    self.assertIsNone(proxy["username"])
+                    self.assertIsNone(proxy["password"])
+                else:
+                    self.assertEqual(proxy["username"], "operator")
+                    self.assertEqual(proxy["password"], "secret")
 
     def test_disabled_proxy_returns_none(self):
         account = AdvertisingAccount(proxy_enabled=False)

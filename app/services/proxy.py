@@ -16,6 +16,7 @@ from app.database.models import AdvertisingAccount, ProxyCheckHistory
 from app.services.account_health import update_persisted_health
 from app.services.device_identity import proxy_diagnostic_identity_kwargs
 from app.telethon.config import get_api_credentials
+from app.telethon.proxy import build_telethon_proxy_config
 
 logger = logging.getLogger(__name__)
 
@@ -349,18 +350,18 @@ async def test_proxy_with_type(
             proxy_config.password,
         )
         api_id, api_hash = get_api_credentials()
+        telethon_proxy = build_telethon_proxy_config(
+            proxy_type,
+            proxy_config.host,
+            proxy_config.port,
+            proxy_config.username,
+            proxy_config.password,
+        )
         client = TelegramClient(
             StringSession(),
             api_id,
             api_hash,
-            proxy={
-                "proxy_type": proxy_type.lower(),
-                "addr": proxy_config.host,
-                "port": proxy_config.port,
-                "rdns": True,
-                "username": proxy_config.username or None,
-                "password": proxy_config.password or None,
-            },
+            proxy=telethon_proxy,
             connection_retries=1,
             request_retries=1,
             timeout=timeout_seconds,
@@ -383,6 +384,23 @@ async def test_proxy_with_type(
             proxy_type=proxy_type,
             success=True,
             latency_ms=latency_ms,
+        )
+    except TypeError as error:
+        logger.exception(
+            "proxy_telegram_check_type_error proxy_type=%s host=%s port=%s "
+            "has_username=%s has_password=%s error_repr=%r",
+            proxy_type,
+            proxy_config.host,
+            proxy_config.port,
+            bool(proxy_config.username),
+            bool(proxy_config.password),
+            error,
+        )
+        return ProxyTestResult(
+            proxy_type=proxy_type,
+            success=False,
+            error=_format_proxy_error(error),
+            latency_ms=None,
         )
     except Exception as error:
         return ProxyTestResult(
@@ -644,7 +662,8 @@ def format_proxy_timestamp(value: datetime) -> str:
 
 def _format_proxy_error(error: Exception) -> str:
     """Convert low-level connection failures into safe operator diagnostics."""
-    error_text = str(error).lower()
+    raw_text = str(error).strip()
+    error_text = raw_text.lower()
     if isinstance(error, asyncio.TimeoutError) or "timed out" in error_text:
         return "Прокси не ответил вовремя"
     if "authentication" in error_text or "auth" in error_text:
@@ -655,4 +674,9 @@ def _format_proxy_error(error: Exception) -> str:
         return "Не удалось найти хост прокси"
     if isinstance(error, ProxyConfigurationError):
         return str(error)
+    if isinstance(error, TypeError):
+        reason = raw_text or repr(error)
+        return f"Ошибка формата прокси для Telethon: {reason}"
+    if raw_text:
+        return f"Не удалось подключиться через прокси: {type(error).__name__}: {raw_text}"
     return f"Не удалось подключиться через прокси: {type(error).__name__}"
