@@ -135,7 +135,6 @@ def identity_telethon_kwargs(account: AdvertisingAccount) -> dict[str, str]:
         "app_version": account.app_version,
         "lang_code": account.lang_code,
         "system_lang_code": account.system_lang_code,
-        "lang_pack": account.lang_pack or "",
     }
 
 
@@ -147,5 +146,4 @@ def proxy_diagnostic_identity_kwargs() -> dict[str, str]:
         "app_version": "5.16.3 x64",
         "lang_code": "ru",
         "system_lang_code": "ru-RU",
-        "lang_pack": "",
     }

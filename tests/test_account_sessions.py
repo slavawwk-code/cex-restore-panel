@@ -22,6 +22,7 @@ from app.services.account_sessions import (
 from app.services.device_identity import (
     ensure_account_identity,
     identity_telethon_kwargs,
+    proxy_diagnostic_identity_kwargs,
     regenerate_account_identity,
 )
 from app.services.telethon_auth import send_login_code
@@ -226,6 +227,7 @@ class AccountSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["system_version"], self.account.system_version)
         self.assertEqual(kwargs["app_version"], self.account.app_version)
         self.assertEqual(kwargs["lang_code"], self.account.lang_code)
+        self.assertNotIn("lang_pack", kwargs)
 
     async def test_regenerate_identity_requires_explicit_call(self):
         ensure_account_identity(self.account)
@@ -265,6 +267,21 @@ class AccountSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["system_version"], self.account.system_version)
         self.assertEqual(kwargs["app_version"], self.account.app_version)
         self.assertEqual(kwargs["lang_code"], self.account.lang_code)
+        self.assertNotIn("lang_pack", kwargs)
+
+    async def test_proxy_diagnostic_identity_kwargs_are_telethon_compatible(self):
+        kwargs = proxy_diagnostic_identity_kwargs()
+        self.assertEqual(
+            set(kwargs),
+            {
+                "device_model",
+                "system_version",
+                "app_version",
+                "lang_code",
+                "system_lang_code",
+            },
+        )
+        self.assertNotIn("lang_pack", kwargs)
 
 
 class LegacyMigrationTests(unittest.TestCase):
