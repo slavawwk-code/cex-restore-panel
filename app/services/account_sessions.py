@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import logging
 import os
 import sqlite3
 from dataclasses import dataclass
@@ -23,6 +24,7 @@ from app.telethon.proxy import build_proxy
 
 MAX_SESSION_FILE_BYTES = 10 * 1024 * 1024
 MAX_STRING_SESSION_LENGTH = 4096
+logger = logging.getLogger(__name__)
 
 
 class AccountSessionError(ValueError):
@@ -103,6 +105,13 @@ def create_account_client(
         session_value = override_session
 
     api_id, api_hash = get_account_api_credentials(account)
+    identity_kwargs = sanitize_telethon_identity_kwargs(
+        identity_telethon_kwargs(account)
+    )
+    identity_kwargs.pop("lang_pack", None)
+    identity_kwargs.pop("timezone", None)
+    identity_kwargs.pop("identity_created_at", None)
+    logger.info("telethon_identity_kwargs keys=%s", sorted(identity_kwargs.keys()))
     return TelegramClient(
         session_value,
         api_id,
@@ -111,7 +120,7 @@ def create_account_client(
         connection_retries=1,
         request_retries=2,
         timeout=15,
-        **sanitize_telethon_identity_kwargs(identity_telethon_kwargs(account)),
+        **identity_kwargs,
     )
 
 

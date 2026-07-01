@@ -360,6 +360,13 @@ async def test_proxy_with_type(
             proxy_config.username,
             proxy_config.password,
         )
+        identity_kwargs = sanitize_telethon_identity_kwargs(
+            proxy_diagnostic_identity_kwargs()
+        )
+        identity_kwargs.pop("lang_pack", None)
+        identity_kwargs.pop("timezone", None)
+        identity_kwargs.pop("identity_created_at", None)
+        logger.info("telethon_identity_kwargs keys=%s", sorted(identity_kwargs.keys()))
         client = TelegramClient(
             StringSession(),
             api_id,
@@ -368,7 +375,7 @@ async def test_proxy_with_type(
             connection_retries=1,
             request_retries=1,
             timeout=timeout_seconds,
-            **sanitize_telethon_identity_kwargs(proxy_diagnostic_identity_kwargs()),
+            **identity_kwargs,
         )
         try:
             async def verify_telegram() -> None:

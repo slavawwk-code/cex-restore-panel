@@ -270,6 +270,39 @@ class AccountSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["lang_code"], self.account.lang_code)
         self.assertNotIn("lang_pack", kwargs)
 
+    async def test_account_client_callsite_removes_forbidden_identity_kwargs(self):
+        session_dir = self.root / "sessions"
+        session_dir.mkdir(parents=True)
+        session_file = session_dir / f"{self.account.id}.session"
+        session_file.write_bytes(self._sqlite_session_bytes())
+        self.account.session_file_path = session_file.name
+        self.account.proxy_enabled = False
+
+        dirty_identity = {
+            "device_model": "Desktop",
+            "system_version": "Windows 11 x64",
+            "app_version": "5.16.3 x64",
+            "lang_code": "ru",
+            "system_lang_code": "ru-RU",
+            "lang_pack": "",
+            "timezone": "Europe/Moscow",
+            "identity_created_at": "2026-07-01",
+        }
+        with (
+            patch(
+                "app.services.account_sessions.identity_telethon_kwargs",
+                return_value=dirty_identity,
+            ),
+            patch("app.services.account_sessions.TelegramClient") as telegram_client,
+        ):
+            create_account_client(self.account)
+
+        _, kwargs = telegram_client.call_args
+        self.assertNotIn("lang_pack", kwargs)
+        self.assertNotIn("timezone", kwargs)
+        self.assertNotIn("identity_created_at", kwargs)
+        self.assertEqual(kwargs["device_model"], "Desktop")
+
     async def test_proxy_diagnostic_identity_kwargs_are_telethon_compatible(self):
         kwargs = proxy_diagnostic_identity_kwargs()
         self.assertEqual(

@@ -18,6 +18,7 @@ from app.services.proxy import (
     run_fast_proxy_check,
     run_full_proxy_diagnostics,
     save_detected_proxy,
+    test_proxy_with_type,
     validate_proxy_settings,
 )
 from app.telethon.proxy import build_proxy, build_telethon_proxy_config
@@ -224,6 +225,47 @@ class ProxyMigrationTests(unittest.TestCase):
 
 
 class ProxyDetectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_proxy_diagnostic_callsite_removes_forbidden_identity_kwargs(self):
+        config = parse_proxy_string("127.0.0.1:1080:user:password")
+        dirty_identity = {
+            "device_model": "Desktop",
+            "system_version": "Windows 11 x64",
+            "app_version": "5.16.3 x64",
+            "lang_code": "ru",
+            "system_lang_code": "ru-RU",
+            "lang_pack": "",
+            "timezone": "Europe/Moscow",
+            "identity_created_at": "2026-07-01",
+        }
+        client = MagicMock()
+        client.connect = AsyncMock()
+        client.disconnect = AsyncMock()
+        client.is_connected.return_value = True
+        client.is_user_authorized = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "app.services.proxy.proxy_diagnostic_identity_kwargs",
+                return_value=dirty_identity,
+            ),
+            patch(
+                "app.services.proxy.get_api_credentials",
+                return_value=(12345, "a" * 32),
+            ),
+            patch(
+                "app.services.proxy.TelegramClient",
+                return_value=client,
+            ) as telegram_client,
+        ):
+            result = await test_proxy_with_type(config, "SOCKS5", timeout_seconds=1)
+
+        self.assertTrue(result.success)
+        _, kwargs = telegram_client.call_args
+        self.assertNotIn("lang_pack", kwargs)
+        self.assertNotIn("timezone", kwargs)
+        self.assertNotIn("identity_created_at", kwargs)
+        self.assertEqual(kwargs["device_model"], "Desktop")
+
     async def test_fast_check_uses_saved_type_only_and_updates_working_status(self):
         account = AdvertisingAccount(
             id=1,
