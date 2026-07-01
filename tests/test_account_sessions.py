@@ -24,6 +24,7 @@ from app.services.device_identity import (
     identity_telethon_kwargs,
     proxy_diagnostic_identity_kwargs,
     regenerate_account_identity,
+    sanitize_telethon_identity_kwargs,
 )
 from app.services.telethon_auth import send_login_code
 
@@ -282,6 +283,31 @@ class AccountSessionTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertNotIn("lang_pack", kwargs)
+
+    async def test_telethon_identity_sanitizer_drops_lang_pack(self):
+        kwargs = sanitize_telethon_identity_kwargs(
+            {
+                "device_model": "Desktop",
+                "system_version": "Windows 11 x64",
+                "app_version": "5.16.3 x64",
+                "lang_code": "ru",
+                "system_lang_code": "ru-RU",
+                "lang_pack": "",
+                "timezone": "Europe/Moscow",
+            }
+        )
+        self.assertEqual(
+            set(kwargs),
+            {
+                "device_model",
+                "system_version",
+                "app_version",
+                "lang_code",
+                "system_lang_code",
+            },
+        )
+        self.assertNotIn("lang_pack", kwargs)
+        self.assertNotIn("timezone", kwargs)
 
 
 class LegacyMigrationTests(unittest.TestCase):

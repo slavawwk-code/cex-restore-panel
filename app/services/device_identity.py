@@ -51,6 +51,15 @@ LINUX_PROFILES = (
 )
 
 _RNG = random.SystemRandom()
+ALLOWED_TELETHON_IDENTITY_KWARGS = frozenset(
+    {
+        "device_model",
+        "system_version",
+        "app_version",
+        "lang_code",
+        "system_lang_code",
+    }
+)
 
 
 def generate_identity_profile() -> DeviceIdentityProfile:
@@ -129,21 +138,34 @@ def apply_identity_profile(
 def identity_telethon_kwargs(account: AdvertisingAccount) -> dict[str, str]:
     """Return stable Telethon device parameters for this account."""
     ensure_account_identity(account)
+    return sanitize_telethon_identity_kwargs(
+        {
+            "device_model": account.device_model,
+            "system_version": account.system_version,
+            "app_version": account.app_version,
+            "lang_code": account.lang_code,
+            "system_lang_code": account.system_lang_code,
+        }
+    )
+
+
+def sanitize_telethon_identity_kwargs(values: dict) -> dict[str, str]:
+    """Drop identity fields unsupported by Telethon 1.44 TelegramClient."""
     return {
-        "device_model": account.device_model,
-        "system_version": account.system_version,
-        "app_version": account.app_version,
-        "lang_code": account.lang_code,
-        "system_lang_code": account.system_lang_code,
+        key: value
+        for key, value in values.items()
+        if key in ALLOWED_TELETHON_IDENTITY_KWARGS and value is not None
     }
 
 
 def proxy_diagnostic_identity_kwargs() -> dict[str, str]:
     """Stable desktop identity for anonymous proxy connectivity checks."""
-    return {
-        "device_model": "Desktop",
-        "system_version": "Windows 11 x64",
-        "app_version": "5.16.3 x64",
-        "lang_code": "ru",
-        "system_lang_code": "ru-RU",
-    }
+    return sanitize_telethon_identity_kwargs(
+        {
+            "device_model": "Desktop",
+            "system_version": "Windows 11 x64",
+            "app_version": "5.16.3 x64",
+            "lang_code": "ru",
+            "system_lang_code": "ru-RU",
+        }
+    )

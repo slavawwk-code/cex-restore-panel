@@ -14,7 +14,10 @@ from telethon.sessions import StringSession
 
 from app.database.models import AdvertisingAccount, ProxyCheckHistory
 from app.services.account_health import update_persisted_health
-from app.services.device_identity import proxy_diagnostic_identity_kwargs
+from app.services.device_identity import (
+    proxy_diagnostic_identity_kwargs,
+    sanitize_telethon_identity_kwargs,
+)
 from app.telethon.config import get_api_credentials
 from app.telethon.proxy import build_telethon_proxy_config
 
@@ -365,7 +368,7 @@ async def test_proxy_with_type(
             connection_retries=1,
             request_retries=1,
             timeout=timeout_seconds,
-            **proxy_diagnostic_identity_kwargs(),
+            **sanitize_telethon_identity_kwargs(proxy_diagnostic_identity_kwargs()),
         )
         try:
             async def verify_telegram() -> None:
