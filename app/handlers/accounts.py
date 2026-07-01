@@ -15,6 +15,7 @@ from app.keyboards.accounts import (
     get_account_identity_keyboard,
     get_account_identity_confirm_keyboard,
 )
+from app.keyboards.chats import get_account_chats_keyboard
 from app.config import load_settings
 from app.database import get_session
 from app.services.accounts import (
@@ -517,7 +518,7 @@ async def callback_account_chats(query: CallbackQuery):
 
         await query.message.edit_text(
             text,
-            reply_markup=get_account_subpage_keyboard(account_id),
+            reply_markup=get_account_chats_keyboard(account_id),
             parse_mode="HTML",
         )
     finally:

@@ -151,6 +151,43 @@ async def callback_create_chat_step1(query: CallbackQuery, state: FSMContext):
     await query.answer()
 
 
+@router.callback_query(F.data.startswith("chat_create_for_account_"))
+async def callback_create_chat_for_account(query: CallbackQuery, state: FSMContext):
+    """Start chat creation with account already selected."""
+    account_id = int(query.data.split("_")[-1])
+    session = get_session()
+    try:
+        account = get_account(session, account_id)
+        if not account:
+            await query.answer("❌ Аккаунт не найден", show_alert=True)
+            return
+        if account.status != "active":
+            await query.answer("❌ Аккаунт не активен", show_alert=True)
+            return
+
+        templates = list_templates(session, include_inactive=False)
+        if not templates:
+            await query.message.edit_text(
+                "❌ Нет активных шаблонов.\n\nСначала создайте шаблон.",
+                reply_markup=get_chats_menu(),
+            )
+            await query.answer()
+            return
+
+        await state.update_data(account_id=account_id, account_name=account.display_name)
+        await state.set_state(ChatCreation.selecting_template)
+        await query.message.edit_text(
+            "💬 Новый чат\n\n"
+            "Аккаунт уже выбран.\n\n"
+            "Шаг 2 из 5: выберите шаблон\n\n"
+            f"Аккаунт: {account.display_name}",
+            reply_markup=get_templates_selection_keyboard(templates),
+        )
+    finally:
+        session.close()
+    await query.answer()
+
+
 @router.callback_query(ChatCreation.selecting_account, F.data.startswith("create_chat_account_"))
 async def callback_create_chat_step2(query: CallbackQuery, state: FSMContext):
     """Step 2: select template."""

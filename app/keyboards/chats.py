@@ -126,3 +126,14 @@ def get_chat_error_keyboard(chat_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Назад", callback_data=f"chat_detail_{chat_id}")],
         ]
     )
+
+
+def get_account_chats_keyboard(account_id: int) -> InlineKeyboardMarkup:
+    """Actions for chats scoped to one advertising account."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Добавить чат", callback_data=f"chat_create_for_account_{account_id}")],
+            [InlineKeyboardButton(text="Назначить чаты", callback_data=f"chat_create_for_account_{account_id}")],
+            [InlineKeyboardButton(text="Назад", callback_data=f"account_detail_{account_id}")],
+        ]
+    )

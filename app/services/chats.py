@@ -61,7 +61,7 @@ def create_chat(
     """Create a new chat configuration."""
     chat = Chat(
         advertising_account_id=advertising_account_id,
-        template_id=template_id,
+        assigned_template_id=template_id,
         title=title.strip(),
         username_or_chat_id=username_or_chat_id.strip(),
         cooldown_minutes=cooldown_minutes,

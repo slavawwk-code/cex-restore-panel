@@ -22,32 +22,22 @@ class DeviceIdentityProfile:
 
 
 WINDOWS_PROFILES = (
-    DeviceIdentityProfile("Desktop", "Windows 11 x64", "5.16.3 x64", "ru", "ru-RU", "", "Europe/Moscow"),
-    DeviceIdentityProfile("Desktop", "Windows 11 x64", "5.16.3 x64", "en", "en-US", "", "Europe/Warsaw"),
-    DeviceIdentityProfile("Desktop", "Windows 11 Pro x64", "5.16.2 x64", "ru", "ru-RU", "", "Europe/Moscow"),
-    DeviceIdentityProfile("Desktop", "Windows 10 x64", "5.16.3 x64", "ru", "ru-RU", "", "Europe/Moscow"),
-    DeviceIdentityProfile("Desktop", "Windows 10 Pro x64", "5.16.1 x64", "en", "en-US", "", "Europe/Berlin"),
-    DeviceIdentityProfile("Desktop", "Windows 11 x64", "5.15.9 x64", "ru", "ru-RU", "", "Asia/Dubai"),
-    DeviceIdentityProfile("Desktop", "Windows 10 x64", "5.15.8 x64", "ru", "ru-RU", "", "Europe/Riga"),
-    DeviceIdentityProfile("Desktop", "Windows 11 Home x64", "5.16.3 x64", "en", "en-GB", "", "Europe/London"),
-    DeviceIdentityProfile("Desktop", "Windows 11 Pro x64", "5.16.0 x64", "ru", "ru-RU", "", "Europe/Minsk"),
-    DeviceIdentityProfile("Desktop", "Windows 10 Enterprise x64", "5.15.7 x64", "en", "en-US", "", "Europe/Prague"),
-    DeviceIdentityProfile("Desktop", "Windows 11 x64", "5.16.2 x64", "ru", "ru-RU", "", "Europe/Moscow"),
-    DeviceIdentityProfile("Desktop", "Windows 10 x64", "5.16.0 x64", "en", "en-US", "", "Asia/Tbilisi"),
-    DeviceIdentityProfile("Desktop", "Windows 11 x64", "5.15.9 x64", "ru", "ru-RU", "", "Europe/Vilnius"),
-    DeviceIdentityProfile("Desktop", "Windows 10 Pro x64", "5.16.3 x64", "ru", "ru-RU", "", "Europe/Moscow"),
+    DeviceIdentityProfile("Desktop", "Windows 11 Home x64", "5.16.3 x64", "ru", "ru", "", "Europe/Moscow"),
+    DeviceIdentityProfile("Desktop", "Windows 11 Pro x64", "5.16.3 x64", "ru", "ru", "", "Europe/Moscow"),
+    DeviceIdentityProfile("Desktop", "Windows 10 Pro x64", "5.16.3 x64", "ru", "ru", "", "Europe/Moscow"),
+    DeviceIdentityProfile("Desktop", "Windows 11 Home x64", "5.16.2 x64", "ru", "ru", "", "Europe/Minsk"),
+    DeviceIdentityProfile("Desktop", "Windows 10 Home x64", "5.16.1 x64", "ru", "ru", "", "Europe/Moscow"),
 )
 
 MAC_PROFILES = (
-    DeviceIdentityProfile("MacBook Pro", "macOS 15.5", "5.16.3", "ru", "ru-RU", "", "Europe/Moscow"),
-    DeviceIdentityProfile("MacBook Air", "macOS 14.7", "5.16.2", "en", "en-US", "", "Europe/Berlin"),
-    DeviceIdentityProfile("iMac", "macOS 15.4", "5.16.1", "ru", "ru-RU", "", "Europe/Moscow"),
-    DeviceIdentityProfile("Mac mini", "macOS 14.6", "5.15.9", "en", "en-GB", "", "Europe/London"),
+    DeviceIdentityProfile("MacBook Pro", "macOS 15.5", "5.16", "ru", "ru", "", "Europe/Moscow"),
+    DeviceIdentityProfile("MacBook Air", "macOS 14.7", "5.16", "ru", "ru", "", "Europe/Moscow"),
+    DeviceIdentityProfile("iMac", "macOS 15.4", "5.16", "ru", "ru", "", "Europe/Moscow"),
 )
 
 LINUX_PROFILES = (
-    DeviceIdentityProfile("Desktop", "Ubuntu 24.04", "5.16.3 x64", "ru", "ru-RU", "", "Europe/Moscow"),
-    DeviceIdentityProfile("Desktop", "Ubuntu 22.04", "5.15.9 x64", "en", "en-US", "", "Europe/Warsaw"),
+    DeviceIdentityProfile("Ubuntu Desktop", "Ubuntu 24.04", "5.16", "ru", "ru", "", "Europe/Moscow"),
+    DeviceIdentityProfile("Ubuntu Desktop", "Ubuntu 22.04", "5.16", "ru", "ru", "", "Europe/Moscow"),
 )
 
 _RNG = random.SystemRandom()
@@ -74,7 +64,54 @@ def generate_identity_profile() -> DeviceIdentityProfile:
         "mac": MAC_PROFILES,
         "linux": LINUX_PROFILES,
     }[family]
-    return _RNG.choice(profiles)
+    profile = _RNG.choice(profiles)
+    validate_identity_profile(profile)
+    return profile
+
+
+def validate_identity_profile(profile: DeviceIdentityProfile) -> None:
+    """Reject impossible Telegram Desktop identity combinations."""
+    combined = " ".join(
+        (
+            profile.device_model,
+            profile.system_version,
+            profile.app_version,
+            profile.lang_code,
+            profile.system_lang_code,
+            profile.lang_pack,
+            profile.timezone,
+        )
+    ).lower()
+    if "viper" in combined:
+        raise ValueError("identity profile contains forbidden device name")
+    if "ios" in combined or "android" in combined:
+        raise ValueError("mobile OS is not valid for Telegram Desktop identity")
+    device = profile.device_model.lower()
+    system = profile.system_version.lower()
+    if "macbook" in device and "windows" in system:
+        raise ValueError("MacBook device cannot use Windows system version")
+    if "ubuntu" in device and "windows" in system:
+        raise ValueError("Ubuntu device cannot use Windows system version")
+    if device == "desktop" and ("ios" in system or "android" in system):
+        raise ValueError("Desktop device cannot use mobile system version")
+    if "windows" in system and device != "desktop":
+        raise ValueError("Windows Telegram Desktop profile must use Desktop device")
+    if ("macbook" in device or "imac" in device or "mac mini" in device) and "macos" not in system:
+        raise ValueError("Apple desktop profile must use macOS system version")
+    if "ubuntu" in device and not ("ubuntu" in system or "linux" in system):
+        raise ValueError("Linux desktop profile must use Ubuntu/Linux system version")
+
+
+def _account_identity_profile(account: AdvertisingAccount) -> DeviceIdentityProfile:
+    return DeviceIdentityProfile(
+        account.device_model or "",
+        account.system_version or "",
+        account.app_version or "",
+        account.lang_code or "",
+        account.system_lang_code or "",
+        account.lang_pack or "",
+        account.timezone or "",
+    )
 
 
 def has_complete_identity(account: AdvertisingAccount) -> bool:
@@ -93,7 +130,20 @@ def has_complete_identity(account: AdvertisingAccount) -> bool:
 def ensure_account_identity(account: AdvertisingAccount) -> bool:
     """Attach identity if missing. Returns True when fields were changed."""
     if has_complete_identity(account):
-        return False
+        try:
+            validate_identity_profile(_account_identity_profile(account))
+            return False
+        except ValueError:
+            logger.warning(
+                "device_identity account_id=%s action=repair_invalid result=started",
+                getattr(account, "id", None),
+            )
+            apply_identity_profile(
+                account,
+                generate_identity_profile(),
+                preserve_created_at=False,
+            )
+            return True
     apply_identity_profile(account, generate_identity_profile(), preserve_created_at=False)
     return True
 

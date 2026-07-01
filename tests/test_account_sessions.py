@@ -20,11 +20,18 @@ from app.services.account_sessions import (
     save_string_session,
 )
 from app.services.device_identity import (
+    LINUX_PROFILES,
+    MAC_PROFILES,
+    WINDOWS_PROFILES,
+    DeviceIdentityProfile,
     ensure_account_identity,
+    ensure_identity_for_all_accounts,
+    generate_identity_profile,
     identity_telethon_kwargs,
     proxy_diagnostic_identity_kwargs,
     regenerate_account_identity,
     sanitize_telethon_identity_kwargs,
+    validate_identity_profile,
 )
 from app.services.telethon_auth import send_login_code
 
@@ -229,6 +236,93 @@ class AccountSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["app_version"], self.account.app_version)
         self.assertEqual(kwargs["lang_code"], self.account.lang_code)
         self.assertNotIn("lang_pack", kwargs)
+
+    async def test_generated_device_profiles_are_realistic_desktop_profiles(self):
+        generated = [generate_identity_profile() for _ in range(100)]
+        for profile in generated:
+            combined = " ".join(
+                [
+                    profile.device_model,
+                    profile.system_version,
+                    profile.app_version,
+                    profile.lang_code,
+                    profile.system_lang_code,
+                    profile.timezone,
+                ]
+            ).lower()
+            self.assertNotIn("ios", combined)
+            self.assertNotIn("android", combined)
+            self.assertNotIn("viper", combined)
+            validate_identity_profile(profile)
+
+        for profile in WINDOWS_PROFILES:
+            self.assertEqual(profile.device_model, "Desktop")
+            self.assertIn("Windows", profile.system_version)
+        for profile in MAC_PROFILES:
+            self.assertIn(profile.device_model, {"MacBook Pro", "MacBook Air", "iMac"})
+            self.assertIn("macOS", profile.system_version)
+        for profile in LINUX_PROFILES:
+            self.assertEqual(profile.device_model, "Ubuntu Desktop")
+            self.assertTrue(
+                "Ubuntu" in profile.system_version or "Linux" in profile.system_version
+            )
+
+    async def test_invalid_existing_identity_is_repaired(self):
+        self.account.device_model = "viper"
+        self.account.system_version = "iOS, Windows 11 Home x64"
+        self.account.app_version = "5.16.3 x64"
+        self.account.lang_code = "ru"
+        self.account.system_lang_code = "ru"
+        self.account.lang_pack = ""
+        self.account.timezone = "Europe/Moscow"
+        self.account.identity_created_at = self.account.created_at
+
+        self.assertTrue(ensure_account_identity(self.account))
+        validate_identity_profile(
+            DeviceIdentityProfile(
+                self.account.device_model,
+                self.account.system_version,
+                self.account.app_version,
+                self.account.lang_code,
+                self.account.system_lang_code,
+                self.account.lang_pack or "",
+                self.account.timezone,
+            )
+        )
+        combined = f"{self.account.device_model} {self.account.system_version}".lower()
+        self.assertNotIn("viper", combined)
+        self.assertNotIn("ios", combined)
+
+    async def test_valid_existing_identity_is_preserved(self):
+        self.account.device_model = "Desktop"
+        self.account.system_version = "Windows 11 Home x64"
+        self.account.app_version = "5.16.3 x64"
+        self.account.lang_code = "ru"
+        self.account.system_lang_code = "ru"
+        self.account.lang_pack = ""
+        self.account.timezone = "Europe/Moscow"
+        self.account.identity_created_at = self.account.created_at
+        before = (
+            self.account.device_model,
+            self.account.system_version,
+            self.account.app_version,
+            self.account.lang_code,
+            self.account.system_lang_code,
+            self.account.timezone,
+            self.account.identity_created_at,
+        )
+
+        self.assertFalse(ensure_account_identity(self.account))
+        after = (
+            self.account.device_model,
+            self.account.system_version,
+            self.account.app_version,
+            self.account.lang_code,
+            self.account.system_lang_code,
+            self.account.timezone,
+            self.account.identity_created_at,
+        )
+        self.assertEqual(before, after)
 
     async def test_regenerate_identity_requires_explicit_call(self):
         ensure_account_identity(self.account)
