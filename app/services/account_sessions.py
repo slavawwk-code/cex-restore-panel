@@ -14,6 +14,7 @@ from telethon.sessions import StringSession
 from app.config import ensure_runtime_directories, load_settings
 from app.database.models import AdvertisingAccount
 from app.services.account_health import update_persisted_health
+from app.services.device_identity import identity_telethon_kwargs
 from app.telethon.config import get_account_api_credentials
 from app.telethon.proxy import build_proxy
 
@@ -107,6 +108,7 @@ def create_account_client(
         connection_retries=1,
         request_retries=2,
         timeout=15,
+        **identity_telethon_kwargs(account),
     )
 
 

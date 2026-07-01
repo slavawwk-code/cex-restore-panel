@@ -40,6 +40,7 @@ def get_account_detail_keyboard(account_id: int, status: str, session_connected:
             InlineKeyboardButton(text="Чаты", callback_data=f"account_chats_{account_id}"),
             InlineKeyboardButton(text="Health", callback_data=f"account_health_{account_id}"),
         ],
+        [InlineKeyboardButton(text="Профиль устройства", callback_data=f"account_identity_{account_id}")],
         [InlineKeyboardButton(text="Настройки", callback_data=f"account_settings_{account_id}")],
         [InlineKeyboardButton(text="Назад", callback_data="accounts_view")],
     ]
@@ -87,6 +88,34 @@ def get_account_subpage_keyboard(account_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Назад", callback_data=f"account_detail_{account_id}")]
+        ]
+    )
+
+
+def get_account_identity_keyboard(account_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Сменить профиль устройства",
+                    callback_data=f"account_identity_regen_{account_id}",
+                )
+            ],
+            [InlineKeyboardButton(text="Назад", callback_data=f"account_detail_{account_id}")],
+        ]
+    )
+
+
+def get_account_identity_confirm_keyboard(account_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Подтвердить регенерацию",
+                    callback_data=f"account_identity_confirm_{account_id}",
+                )
+            ],
+            [InlineKeyboardButton(text="Отмена", callback_data=f"account_identity_{account_id}")],
         ]
     )
 

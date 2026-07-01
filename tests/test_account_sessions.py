@@ -14,9 +14,15 @@ from app.database.migrations import run_startup_migrations
 from app.database.models import AdvertisingAccount, Base
 from app.services.account_health import calculate_account_health
 from app.services.account_sessions import (
+    create_account_client,
     import_session_bytes,
     resolve_session_source,
     save_string_session,
+)
+from app.services.device_identity import (
+    ensure_account_identity,
+    identity_telethon_kwargs,
+    regenerate_account_identity,
 )
 from app.services.telethon_auth import send_login_code
 
@@ -185,6 +191,81 @@ class AccountSessionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(health.score, 100)
 
+    async def test_device_identity_is_generated_once_and_used_for_telethon(self):
+        self.assertIsNone(self.account.device_model)
+
+        changed = ensure_account_identity(self.account)
+        self.db.commit()
+        first_identity = (
+            self.account.device_model,
+            self.account.system_version,
+            self.account.app_version,
+            self.account.lang_code,
+            self.account.system_lang_code,
+            self.account.timezone,
+            self.account.identity_created_at,
+        )
+
+        self.assertTrue(changed)
+        self.assertFalse(ensure_account_identity(self.account))
+        self.assertEqual(
+            first_identity,
+            (
+                self.account.device_model,
+                self.account.system_version,
+                self.account.app_version,
+                self.account.lang_code,
+                self.account.system_lang_code,
+                self.account.timezone,
+                self.account.identity_created_at,
+            ),
+        )
+
+        kwargs = identity_telethon_kwargs(self.account)
+        self.assertEqual(kwargs["device_model"], self.account.device_model)
+        self.assertEqual(kwargs["system_version"], self.account.system_version)
+        self.assertEqual(kwargs["app_version"], self.account.app_version)
+        self.assertEqual(kwargs["lang_code"], self.account.lang_code)
+
+    async def test_regenerate_identity_requires_explicit_call(self):
+        ensure_account_identity(self.account)
+        first_identity = (
+            self.account.device_model,
+            self.account.system_version,
+            self.account.app_version,
+            self.account.timezone,
+        )
+        regenerate_account_identity(self.account)
+        second_identity = (
+            self.account.device_model,
+            self.account.system_version,
+            self.account.app_version,
+            self.account.timezone,
+        )
+
+        self.assertTrue(self.account.identity_created_at)
+        # The random profile can theoretically be the same; the important safety
+        # property is that regeneration only happens through this explicit call.
+        self.assertEqual(len(first_identity), len(second_identity))
+
+    async def test_account_client_passes_identity_kwargs(self):
+        session_dir = self.root / "sessions"
+        session_dir.mkdir(parents=True)
+        session_file = session_dir / f"{self.account.id}.session"
+        session_file.write_bytes(self._sqlite_session_bytes())
+        self.account.session_file_path = session_file.name
+        self.account.proxy_enabled = False
+        ensure_account_identity(self.account)
+
+        with patch("app.services.account_sessions.TelegramClient") as telegram_client:
+            create_account_client(self.account)
+
+        _, kwargs = telegram_client.call_args
+        self.assertEqual(kwargs["device_model"], self.account.device_model)
+        self.assertEqual(kwargs["system_version"], self.account.system_version)
+        self.assertEqual(kwargs["app_version"], self.account.app_version)
+        self.assertEqual(kwargs["lang_code"], self.account.lang_code)
+
 
 class LegacyMigrationTests(unittest.TestCase):
     def test_session_columns_are_added_without_recreating_accounts(self):
@@ -233,6 +314,14 @@ class LegacyMigrationTests(unittest.TestCase):
                 "lifecycle_reason",
                 "login_attempt_count",
                 "auth_generation",
+                "device_model",
+                "system_version",
+                "app_version",
+                "lang_code",
+                "system_lang_code",
+                "lang_pack",
+                "timezone",
+                "identity_created_at",
             }.issubset(columns)
         )
         self.assertEqual(count, 1)

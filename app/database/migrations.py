@@ -51,6 +51,14 @@ ACCOUNT_SESSION_COLUMNS = {
     "lifecycle_reason": "TEXT",
     "login_attempt_count": "INTEGER NOT NULL DEFAULT 0",
     "auth_generation": "INTEGER NOT NULL DEFAULT 0",
+    "device_model": "VARCHAR",
+    "system_version": "VARCHAR",
+    "app_version": "VARCHAR",
+    "lang_code": "VARCHAR",
+    "system_lang_code": "VARCHAR",
+    "lang_pack": "VARCHAR",
+    "timezone": "VARCHAR",
+    "identity_created_at": "DATETIME",
 }
 
 

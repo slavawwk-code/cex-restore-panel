@@ -2,6 +2,7 @@ import logging
 from sqlalchemy.orm import Session
 from app.database.models import AdvertisingAccount, Chat
 from app.services.account_health import update_persisted_health
+from app.services.device_identity import ensure_account_identity
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ def create_account(
         telethon_session=telethon_session,
         status="warming",
     )
+    ensure_account_identity(account)
     session.add(account)
     session.commit()
     logger.info("Created account: %s", display_name)

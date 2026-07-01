@@ -14,6 +14,7 @@ from telethon.sessions import StringSession
 
 from app.database.models import AdvertisingAccount, ProxyCheckHistory
 from app.services.account_health import update_persisted_health
+from app.services.device_identity import proxy_diagnostic_identity_kwargs
 from app.telethon.config import get_api_credentials
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,9 @@ def _parse_proxy_url(value: str) -> ParsedProxy:
     try:
         port = parsed.port
     except ValueError as error:
+        fallback = _parse_scheme_host_port_credentials(parsed.netloc, proxy_type)
+        if fallback is not None:
+            return fallback
         raise ProxyStringParseError("Указан неверный порт прокси") from error
     if not parsed.hostname or port is None:
         raise ProxyStringParseError("Не удалось найти хост и порт прокси")
@@ -120,6 +124,35 @@ def _parse_proxy_url(value: str) -> ParsedProxy:
     return ParsedProxy(
         proxy_type=proxy_type,
         host=parsed.hostname,
+        port=port,
+        username=username,
+        password=password,
+        candidate_types=(proxy_type,),
+    )
+
+
+def _parse_scheme_host_port_credentials(
+    netloc: str,
+    proxy_type: str,
+) -> ParsedProxy | None:
+    """Parse seller format scheme://host:port:login:password."""
+    if "@" in netloc or netloc.startswith("["):
+        return None
+    parts = netloc.split(":")
+    if len(parts) < 4:
+        return None
+    host, port_text, username = parts[:3]
+    password = ":".join(parts[3:])
+    try:
+        port = int(port_text)
+    except ValueError as error:
+        raise ProxyStringParseError("Указан неверный порт прокси") from error
+    username = unquote(username)
+    password = unquote(password)
+    _validate_credentials_pair(username, password)
+    return ParsedProxy(
+        proxy_type=proxy_type,
+        host=host,
         port=port,
         username=username,
         password=password,
@@ -331,6 +364,7 @@ async def test_proxy_with_type(
             connection_retries=1,
             request_retries=1,
             timeout=timeout_seconds,
+            **proxy_diagnostic_identity_kwargs(),
         )
         try:
             async def verify_telegram() -> None:

@@ -21,6 +21,7 @@ from app.database import get_session
 from app.database.models import Template
 from app.services.chats import (
     create_chat,
+    inspect_chat_access,
     list_chats,
     get_chat,
     get_chat_info,
@@ -240,9 +241,40 @@ async def process_chat_username(message: Message, state: FSMContext):
             return
 
     await state.update_data(username_or_chat_id=username)
+    data = await state.get_data()
+    account_id = data["account_id"]
+    await message.answer("Проверяю доступ аккаунта к чату через Telegram…")
+    db_session = get_session()
+    try:
+        inspection = await inspect_chat_access(db_session, account_id, username)
+    finally:
+        db_session.close()
+    if inspection.success and inspection.can_write is not False and inspection.title:
+        title = inspection.title[:100]
+        await state.update_data(
+            title=title,
+            chat_access_diagnostics=inspection.format_diagnostics(),
+        )
+        await state.set_state(ChatCreation.entering_cooldown)
+        await message.answer(
+            f"{inspection.format_diagnostics()}\n\n"
+            f"Название сохранено автоматически: {title}\n\n"
+            "Шаг 4 из 4: укажите интервал между сообщениями в минутах (1–1440):"
+        )
+        return
+    if inspection.success and inspection.can_write is False:
+        await message.answer(
+            f"❌ Чат найден, но отправка недоступна.\n\n"
+            f"{inspection.format_diagnostics()}\n\n"
+            "Выберите другой чат или аккаунт с правом отправки."
+        )
+        return
+
+    await state.update_data(chat_access_diagnostics=inspection.format_diagnostics())
     await state.set_state(ChatCreation.entering_title)
     await message.answer(
-        f"✅ Чат: {username}\n\n"
+        f"⚠️ Не удалось автоматически получить название.\n\n"
+        f"{inspection.format_diagnostics()}\n\n"
         "Шаг 4 из 5: введите понятное название чата (2–100 символов):"
     )
 
@@ -310,6 +342,20 @@ async def confirm_chat_creation(query: CallbackQuery, state: FSMContext):
     session = get_session()
 
     try:
+        inspection = await inspect_chat_access(
+            session,
+            data["account_id"],
+            data["username_or_chat_id"],
+        )
+        if not inspection.success or inspection.can_write is False:
+            await query.message.edit_text(
+                "❌ Чат не создан\n\n"
+                f"{inspection.format_diagnostics()}\n\n"
+                "Исправьте причину и попробуйте добавить чат снова.",
+                reply_markup=get_chats_menu(),
+            )
+            return
+
         chat = create_chat(
             session,
             advertising_account_id=data["account_id"],
@@ -326,13 +372,15 @@ async def confirm_chat_creation(query: CallbackQuery, state: FSMContext):
             f"📱 {data['account_name']}\n"
             f"📝 {data['template_name']}\n"
             f"⏱️ {data['cooldown']} мин.\n\n"
+            f"{inspection.format_diagnostics()}\n\n"
             "Чат добавлен в расписание.",
             reply_markup=get_chats_menu(),
         )
     except Exception as e:
         logger.error(f"Error creating chat: {e}", exc_info=True)
         await query.message.edit_text(
-            "❌ Не удалось создать чат.",
+            "❌ Не удалось создать чат.\n\n"
+            f"Причина: {type(e).__name__}: {e}",
             reply_markup=get_chats_menu(),
         )
     finally:

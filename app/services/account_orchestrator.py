@@ -16,6 +16,7 @@ from telethon.errors import (
     PhoneCodeExpiredError,
     PhoneCodeInvalidError,
     PhoneNumberInvalidError,
+    PasswordHashInvalidError,
     RPCError,
     SessionPasswordNeededError,
     UnauthorizedError,
@@ -69,6 +70,8 @@ class AuthFlowState(StrEnum):
     CODE_VERIFIED = "CODE_VERIFIED"
     PASSWORD_REQUIRED = "PASSWORD_REQUIRED"
     AUTHORIZED = "AUTHORIZED"
+    EXPIRED = "EXPIRED"
+    ERROR = "ERROR"
 
 
 class OrchestratorError(RuntimeError):
@@ -140,6 +143,7 @@ class AuthContext:
     state: AuthFlowState = AuthFlowState.CREATED
     phone_code_hash: str | None = field(default=None, repr=False)
     session_fingerprint: str = ""
+    password_attempts: int = field(default=0, repr=False)
     created_at: float = field(default_factory=time.monotonic)
     expires_at: float = 0.0
     updated_at: float = field(default_factory=time.monotonic)
@@ -1006,7 +1010,16 @@ class AccountOrchestrator:
                     )
                 self._safe_state_after_error(session, job.account_id, error)
                 self._log_id(job.account_id, None, f"login_{job.action}", "error", started)
-                if job.action != "code" and not isinstance(error, SessionPasswordNeededError):
+                keep_password_context = (
+                    job.action == "password"
+                    and isinstance(error, TelethonAuthError)
+                    and getattr(error, "keep_auth_context", False)
+                )
+                if (
+                    job.action != "code"
+                    and not isinstance(error, SessionPasswordNeededError)
+                    and not keep_password_context
+                ):
                     await self._drop_auth_context(job.account_id, f"login_error_{job.action}")
                 raise
             finally:
@@ -1146,6 +1159,21 @@ class AccountOrchestrator:
                 await asyncio.wait_for(context.client.connect(), timeout=15)
             self._debug_auth_context(context, "password_sign_in", context.client)
             await context.client.sign_in(password=password)
+        except PasswordHashInvalidError as error:
+            context.password_attempts += 1
+            remaining = max(0, 3 - context.password_attempts)
+            auth_error = TelethonAuthError(
+                "Пароль 2FA неверный. "
+                + (
+                    f"Осталось попыток: {remaining}."
+                    if remaining > 0
+                    else "Лимит попыток исчерпан. Нужно запросить код заново."
+                )
+            )
+            auth_error.keep_auth_context = remaining > 0
+            if remaining <= 0:
+                context.touch(AuthFlowState.ERROR)
+            raise auth_error from error
         except FloodWaitError as error:
             raise TelethonAuthError(
                 f"Слишком много попыток. Повторите через {error.seconds} сек.",
@@ -1161,6 +1189,7 @@ class AccountOrchestrator:
             ) from error
 
         context.touch(AuthFlowState.AUTHORIZED)
+        context.password_attempts = 0
         self._debug_auth_context(context, "password_verified", context.client)
         return True
 

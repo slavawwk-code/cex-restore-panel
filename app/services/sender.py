@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.database.models import AdvertisingAccount, Chat, Template, SendLog
 from app.config import load_settings
 from app.services.account_orchestrator import account_orchestrator
+from app.services.chats import _entity_send_permission, format_chat_access_error
 from telethon.errors import (
     FloodWaitError,
     ChatWriteForbiddenError,
@@ -105,9 +106,11 @@ async def real_send(
                     await client.connect()
                 if not await client.is_user_authorized():
                     raise UnauthorizedError("Клиент Telegram не авторизован")
-                return await client.send_message(
-                    chat.username_or_chat_id, template.text
-                )
+                entity = await client.get_entity(chat.username_or_chat_id)
+                can_write, reason = _entity_send_permission(entity)
+                if can_write is False:
+                    raise PermissionError(reason or "Нет права отправки")
+                return await client.send_message(entity, template.text)
 
             message = await account_orchestrator.run_client_operation(
                 account.id,
@@ -162,7 +165,7 @@ async def real_send(
             raise Exception(error_msg)
 
         except RPCError as e:
-            error_msg = f"Ошибка Telegram: {type(e).__name__}"
+            error_msg = format_chat_access_error(e)
             logger.error(f"RPC error in chat {chat.id}: {error_msg}")
             raise Exception(error_msg)
 

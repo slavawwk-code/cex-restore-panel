@@ -88,6 +88,14 @@ class AdvertisingAccount(Base):
     lifecycle_reason = Column(Text, nullable=True)
     login_attempt_count = Column(Integer, nullable=False, default=0)
     auth_generation = Column(Integer, nullable=False, default=0)
+    device_model = Column(String, nullable=True)
+    system_version = Column(String, nullable=True)
+    app_version = Column(String, nullable=True)
+    lang_code = Column(String, nullable=True)
+    system_lang_code = Column(String, nullable=True)
+    lang_pack = Column(String, nullable=True)
+    timezone = Column(String, nullable=True)
+    identity_created_at = Column(DateTime, nullable=True)
 
     chats = relationship("Chat", back_populates="account", cascade="all, delete-orphan")
     send_logs = relationship("SendLog", back_populates="account", cascade="all, delete-orphan")
@@ -220,12 +228,18 @@ class AutopilotControlState(Base):
 def init_db():
     """Initialize database tables."""
     from app.database.migrations import run_startup_migrations
+    from app.services.device_identity import ensure_identity_for_all_accounts
 
     database_existed = bool(
         runtime_settings.database_path and runtime_settings.database_path.exists()
     )
     Base.metadata.create_all(bind=engine)
     run_startup_migrations(engine)
+    session = SessionLocal()
+    try:
+        ensure_identity_for_all_accounts(session)
+    finally:
+        session.close()
     if runtime_settings.database_path is not None and not database_existed:
         runtime_settings.database_path.chmod(0o600)
     logger.info("Database initialized successfully")

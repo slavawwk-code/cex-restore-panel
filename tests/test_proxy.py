@@ -52,6 +52,11 @@ class ProxyConfigurationTests(unittest.TestCase):
                 "user",
                 "password",
             ),
+            "socks5://proxy.example:1080:user:password": (
+                "SOCKS5",
+                "user",
+                "password",
+            ),
             "socks4://user:password@proxy.example:1080": (
                 "SOCKS4",
                 "user",
@@ -72,6 +77,15 @@ class ProxyConfigurationTests(unittest.TestCase):
         )
         self.assertEqual(parsed.username, "user@mail")
         self.assertEqual(parsed.password, "p:ss")
+
+    def test_scheme_seller_host_port_user_password_format(self):
+        parsed = parse_proxy_string("socks5://83.138.52.101:62271:epcdmWGm:zdn4Vy9A")
+        self.assertEqual(parsed.proxy_type, "SOCKS5")
+        self.assertEqual(parsed.host, "83.138.52.101")
+        self.assertEqual(parsed.port, 62271)
+        self.assertEqual(parsed.username, "epcdmWGm")
+        self.assertEqual(parsed.password, "zdn4Vy9A")
+        self.assertEqual(parsed.candidate_types, ("SOCKS5",))
 
     def test_password_is_not_exposed_by_parsed_value_repr(self):
         parsed = parse_proxy_string("proxy.example:1080:user:top-secret")

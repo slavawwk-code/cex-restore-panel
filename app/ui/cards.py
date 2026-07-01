@@ -93,12 +93,29 @@ def format_account_card(
         f"Telegram\n{telegram}\n\n"
         f"Авторизация\n{auth_status}\n\n"
         f"Прокси\n{proxy}\n\n"
+        f"Профиль устройства\n"
+        f"{escape(account.device_model or '—')} · {escape(account.system_version or '—')}\n"
+        f"Telegram Desktop {escape(account.app_version or '—')}\n\n"
         f"Чаты\n{health.chat_count}\n\n"
         f"Шаблоны\n{health.template_count}\n\n"
         f"Последняя активность\n{format_datetime(health.last_activity_at)}\n\n"
         f"Последняя проверка\n{format_datetime(account.last_health_check)}\n\n"
         f"Ошибка\n{escape(auth_error or '—')}\n\n"
         f"Health\n{health_indicator(health.score)} {health.score}%\n\n"
+        f"{SEPARATOR}"
+    )
+
+
+def format_account_identity_card(account: AdvertisingAccount) -> str:
+    return (
+        f"<b>Профиль устройства · {escape(account.display_name)}</b>\n\n"
+        f"{SEPARATOR}\n\n"
+        f"Устройство\n{escape(account.device_model or '—')}\n\n"
+        f"OS\n{escape(account.system_version or '—')}\n\n"
+        f"Версия Telegram Desktop\n{escape(account.app_version or '—')}\n\n"
+        f"Язык\n{escape(account.lang_code or '—')} / {escape(account.system_lang_code or '—')}\n\n"
+        f"Часовой пояс\n{escape(account.timezone or '—')}\n\n"
+        f"Создан\n{format_datetime(account.identity_created_at)}\n\n"
         f"{SEPARATOR}"
     )
 

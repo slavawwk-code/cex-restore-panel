@@ -12,7 +12,10 @@ from app.keyboards.accounts import (
     get_account_confirmation_keyboard,
     get_account_settings_keyboard,
     get_account_subpage_keyboard,
+    get_account_identity_keyboard,
+    get_account_identity_confirm_keyboard,
 )
+from app.config import load_settings
 from app.database import get_session
 from app.services.accounts import (
     create_account,
@@ -28,10 +31,15 @@ from app.services.account_lifecycle_manager import (
 from app.services.account_orchestrator import account_orchestrator
 from app.scheduler import SchedulerService
 from app.services.account_health import calculate_account_health
+from app.services.device_identity import (
+    ensure_account_identity,
+    regenerate_account_identity,
+)
 from app.ui.cards import (
     SEPARATOR,
     account_status,
     format_account_card,
+    format_account_identity_card,
     format_account_health_card,
     format_accounts_list,
 )
@@ -48,6 +56,11 @@ def set_scheduler(service: SchedulerService) -> None:
 
 def _scheduler_running() -> bool:
     return bool(scheduler_service and scheduler_service.running)
+
+
+def _is_owner(query: CallbackQuery) -> bool:
+    owner_id = load_settings(require_secrets=False).owner_telegram_id
+    return owner_id is not None and query.from_user.id == owner_id
 
 
 @router.callback_query(F.data == "accounts_list")
@@ -104,6 +117,8 @@ async def callback_account_detail(query: CallbackQuery):
         if not account:
             await query.answer("🔴 Аккаунт не найден", show_alert=True)
             return
+        if ensure_account_identity(account):
+            session.commit()
 
         health = calculate_account_health(session, account, _scheduler_running())
 
@@ -115,6 +130,93 @@ async def callback_account_detail(query: CallbackQuery):
     finally:
         session.close()
     await query.answer()
+
+
+@router.callback_query(
+    lambda query: query.data
+    and query.data.startswith("account_identity_")
+    and not query.data.startswith("account_identity_regen_")
+    and not query.data.startswith("account_identity_confirm_")
+)
+async def callback_account_identity(query: CallbackQuery):
+    """Show read-only account identity profile."""
+    account_id = int(query.data.split("_")[-1])
+    session = get_session()
+    try:
+        account = get_account(session, account_id)
+        if not account:
+            await query.answer("🔴 Аккаунт не найден", show_alert=True)
+            return
+        if ensure_account_identity(account):
+            session.commit()
+        await query.message.edit_text(
+            format_account_identity_card(account),
+            reply_markup=get_account_identity_keyboard(account_id),
+            parse_mode="HTML",
+        )
+    finally:
+        session.close()
+    await query.answer()
+
+
+@router.callback_query(F.data.startswith("account_identity_regen_"))
+async def callback_account_identity_regen(query: CallbackQuery):
+    account_id = int(query.data.split("_")[-1])
+    if not _is_owner(query):
+        await query.answer("Доступно только владельцу", show_alert=True)
+        return
+    session = get_session()
+    try:
+        account = get_account(session, account_id)
+        if not account:
+            await query.answer("🔴 Аккаунт не найден", show_alert=True)
+            return
+        text = (
+            f"<b>Смена профиля устройства · {escape(account.display_name)}</b>\n\n"
+            f"{SEPARATOR}\n\n"
+            "Это изменит device identity для следующих новых Telethon-подключений.\n"
+            "Текущая сессия не удаляется, но активный клиент будет отключён и "
+            "создастся заново при следующей операции.\n\n"
+            "Продолжить?\n\n"
+            f"{SEPARATOR}"
+        )
+        await query.message.edit_text(
+            text,
+            reply_markup=get_account_identity_confirm_keyboard(account_id),
+            parse_mode="HTML",
+        )
+    finally:
+        session.close()
+    await query.answer()
+
+
+@router.callback_query(F.data.startswith("account_identity_confirm_"))
+async def callback_account_identity_confirm(query: CallbackQuery):
+    account_id = int(query.data.split("_")[-1])
+    if not _is_owner(query):
+        await query.answer("Доступно только владельцу", show_alert=True)
+        return
+    session = get_session()
+    try:
+        account = get_account(session, account_id)
+        if not account:
+            await query.answer("🔴 Аккаунт не найден", show_alert=True)
+            return
+        regenerate_account_identity(account)
+        session.commit()
+        await account_orchestrator.client_manager.disconnect_client(account_id)
+        logger.info(
+            "device_identity account_id=%s action=regenerate result=success",
+            account_id,
+        )
+        await query.message.edit_text(
+            format_account_identity_card(account),
+            reply_markup=get_account_identity_keyboard(account_id),
+            parse_mode="HTML",
+        )
+        await query.answer("Профиль устройства обновлён")
+    finally:
+        session.close()
 
 
 @router.callback_query(F.data.startswith("account_health_"))

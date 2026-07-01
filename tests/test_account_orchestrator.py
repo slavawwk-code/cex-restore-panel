@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from telethon.errors import SessionPasswordNeededError
+from telethon.errors import PasswordHashInvalidError, SessionPasswordNeededError
 
 from app.database.models import AdvertisingAccount, Base
 from app.services.account_orchestrator import (
@@ -66,6 +66,14 @@ class FakeLoginClient:
         self.sign_in_clients.append(id(self))
         if kwargs.get("password"):
             return True
+        raise SessionPasswordNeededError(request=None)
+
+
+class WrongPasswordLoginClient(FakeLoginClient):
+    async def sign_in(self, *args, **kwargs):
+        self.sign_in_clients.append(id(self))
+        if kwargs.get("password"):
+            raise PasswordHashInvalidError(request=None)
         raise SessionPasswordNeededError(request=None)
 
 
@@ -397,6 +405,59 @@ class OrchestratorConcurrencyTests(unittest.IsolatedAsyncioTestCase):
 
         await orchestrator.stop()
         create_client.assert_not_called()
+
+    async def test_wrong_2fa_password_keeps_context_until_three_attempts(self):
+        orchestrator = self._orchestrator()
+        login_client = WrongPasswordLoginClient()
+        loop = asyncio.get_running_loop()
+
+        with patch(
+            "app.services.account_orchestrator.create_account_client",
+            return_value=login_client,
+        ):
+            request_result = await orchestrator._execute_login_job(
+                _LoginJob(1, "request_code", auth_generation=0, future=loop.create_future())
+            )
+            code_result = await orchestrator._execute_login_job(
+                _LoginJob(
+                    1,
+                    "code",
+                    code="12345",
+                    phone_code_hash=request_result["phone_code_hash"],
+                    auth_generation=0,
+                    future=loop.create_future(),
+                )
+            )
+            self.assertTrue(code_result["requires_password"])
+
+            for attempt in range(2):
+                with self.assertRaises(Exception) as caught:
+                    await orchestrator._execute_login_job(
+                        _LoginJob(
+                        1,
+                        "password",
+                        password=f"wrong-{attempt}",
+                        auth_generation=0,
+                        future=loop.create_future(),
+                        )
+                    )
+                self.assertIn("Пароль 2FA неверный", str(caught.exception))
+                self.assertIn(1, orchestrator._auth_contexts)
+
+            with self.assertRaises(Exception) as caught:
+                await orchestrator._execute_login_job(
+                    _LoginJob(
+                    1,
+                    "password",
+                    password="wrong-final",
+                    auth_generation=0,
+                    future=loop.create_future(),
+                    )
+                )
+            self.assertIn("Нужно запросить код заново", str(caught.exception))
+            self.assertNotIn(1, orchestrator._auth_contexts)
+
+        await orchestrator.stop()
 
 
 if __name__ == "__main__":
