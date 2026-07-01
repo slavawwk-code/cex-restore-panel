@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 import logging
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Text, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Text, Boolean, Table
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from app.config import ensure_runtime_directories, load_settings
@@ -19,6 +19,14 @@ engine = create_engine(
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+
+campaign_chats = Table(
+    "campaign_chats",
+    Base.metadata,
+    Column("campaign_id", Integer, ForeignKey("campaigns.id"), primary_key=True),
+    Column("chat_id", Integer, ForeignKey("chats.id"), primary_key=True),
+)
 
 
 class User(Base):
@@ -127,6 +135,11 @@ class Chat(Base):
     account = relationship("AdvertisingAccount", back_populates="chats")
     template = relationship("Template")
     send_logs = relationship("SendLog", back_populates="chat", cascade="all, delete-orphan")
+    campaigns = relationship(
+        "Campaign",
+        secondary=campaign_chats,
+        back_populates="chats",
+    )
 
     def __repr__(self):
         return f"<Chat {self.id} - {self.title} ({self.status})>"
@@ -144,6 +157,35 @@ class Template(Base):
 
     def __repr__(self):
         return f"<Template {self.id} - {self.name}>"
+
+
+class Campaign(Base):
+    __tablename__ = "campaigns"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    account_id = Column(Integer, ForeignKey("advertising_accounts.id"), nullable=False, index=True)
+    template_id = Column(Integer, ForeignKey("templates.id"), nullable=True, index=True)
+    interval_minutes = Column(Integer, nullable=False, default=60)
+    status = Column(String, nullable=False, default="active", index=True)
+    schedule_enabled = Column(Boolean, nullable=False, default=True)
+    schedule_timezone = Column(String, nullable=False, default="Europe/Moscow")
+    schedule_start_time = Column(String, nullable=True)
+    schedule_end_time = Column(String, nullable=True)
+    first_send_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    account = relationship("AdvertisingAccount")
+    template = relationship("Template")
+    chats = relationship(
+        "Chat",
+        secondary=campaign_chats,
+        back_populates="campaigns",
+    )
+
+    def __repr__(self):
+        return f"<Campaign {self.id} - {self.name} ({self.status})>"
 
 
 class SendLog(Base):

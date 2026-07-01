@@ -23,7 +23,13 @@ DRY_RUN = load_settings(require_secrets=False).dry_run
 telethon_manager = account_orchestrator.client_manager
 
 
-async def can_send_chat(account: AdvertisingAccount, chat: Chat, template: Template) -> tuple[bool, str]:
+async def can_send_chat(
+    account: AdvertisingAccount,
+    chat: Chat,
+    template: Template,
+    interval_minutes: int | None = None,
+    ignore_cooldown: bool = False,
+) -> tuple[bool, str]:
     """
     Check if a chat is eligible for sending.
     Returns (can_send, reason).
@@ -56,14 +62,15 @@ async def can_send_chat(account: AdvertisingAccount, chat: Chat, template: Templ
         return False, "Шаблон отключён"
 
     # Check cooldown
-    if chat.cooldown_minutes < 1 or chat.cooldown_minutes > 1440:
+    effective_interval = interval_minutes if interval_minutes is not None else chat.cooldown_minutes
+    if effective_interval < 1 or effective_interval > 1440:
         return False, "Указан неверный интервал отправки"
 
     # Check if cooldown expired
-    if chat.last_sent_at:
+    if chat.last_sent_at and not ignore_cooldown:
         elapsed = (datetime.utcnow() - chat.last_sent_at).total_seconds() / 60
-        if elapsed < chat.cooldown_minutes:
-            return False, f"Интервал ещё не истёк: {int(chat.cooldown_minutes - elapsed)} мин."
+        if elapsed < effective_interval:
+            return False, f"Интервал ещё не истёк: {int(effective_interval - elapsed)} мин."
 
     return True, "OK"
 
@@ -202,6 +209,8 @@ async def send_message(
     account: AdvertisingAccount,
     chat: Chat,
     template: Template,
+    interval_minutes: int | None = None,
+    ignore_cooldown: bool = False,
 ) -> dict:
     """
     Main sending abstraction.
@@ -230,7 +239,13 @@ async def send_message(
         }
 
     # Check if we can send (re-check to catch any race conditions)
-    can_send, reason = await can_send_chat(account, chat, template)
+    can_send, reason = await can_send_chat(
+        account,
+        chat,
+        template,
+        interval_minutes,
+        ignore_cooldown=ignore_cooldown,
+    )
     if not can_send:
         logger.debug(f"Skipping chat {chat.id}: {reason}")
         return {

@@ -217,3 +217,67 @@ def run_startup_migrations(engine: Engine) -> None:
                 "ON autopilot_control_state (system_state)"
             )
         )
+        connection.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS campaigns ("
+                "id INTEGER PRIMARY KEY, "
+                "name VARCHAR NOT NULL, "
+                "account_id INTEGER NOT NULL, "
+                "template_id INTEGER, "
+                "interval_minutes INTEGER NOT NULL DEFAULT 60, "
+                "status VARCHAR NOT NULL DEFAULT 'active', "
+                "schedule_enabled BOOLEAN NOT NULL DEFAULT TRUE, "
+                "schedule_timezone VARCHAR NOT NULL DEFAULT 'Europe/Moscow', "
+                "schedule_start_time VARCHAR, "
+                "schedule_end_time VARCHAR, "
+                "first_send_at DATETIME, "
+                "created_at DATETIME, "
+                "updated_at DATETIME, "
+                "FOREIGN KEY(account_id) REFERENCES advertising_accounts(id), "
+                "FOREIGN KEY(template_id) REFERENCES templates(id)"
+                ")"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_campaigns_account_id "
+                "ON campaigns (account_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_campaigns_template_id "
+                "ON campaigns (template_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_campaigns_status "
+                "ON campaigns (status)"
+            )
+        )
+        campaign_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("campaigns")
+        }
+        if "first_send_at" not in campaign_columns:
+            connection.execute(
+                text("ALTER TABLE campaigns ADD COLUMN first_send_at DATETIME")
+            )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_campaigns_first_send_at "
+                "ON campaigns (first_send_at)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS campaign_chats ("
+                "campaign_id INTEGER NOT NULL, "
+                "chat_id INTEGER NOT NULL, "
+                "PRIMARY KEY (campaign_id, chat_id), "
+                "FOREIGN KEY(campaign_id) REFERENCES campaigns(id), "
+                "FOREIGN KEY(chat_id) REFERENCES chats(id)"
+                ")"
+            )
+        )

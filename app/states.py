@@ -48,6 +48,16 @@ class ChatEdit(StatesGroup):
     confirmation = State()
 
 
+class CampaignEdit(StatesGroup):
+    """FSM states for campaign editing."""
+
+    waiting_for_name = State()
+    waiting_for_interval = State()
+    waiting_for_schedule = State()
+    managing_chats = State()
+    confirming_chats = State()
+
+
 class TelethonAuth(StatesGroup):
     """FSM states for Telethon authentication flow."""
 

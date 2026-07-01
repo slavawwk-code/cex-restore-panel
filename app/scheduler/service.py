@@ -5,6 +5,7 @@ from app.database import get_session
 from app.database.models import Chat
 from app.config import load_settings
 from app.services.sender import send_message
+from app.services.campaigns import get_effective_campaign_for_chat, mark_campaign_first_send_consumed
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,11 @@ class SchedulerService:
             logger.info(f"Scheduler: Starting check cycle - {chats_checked} active chats to evaluate")
 
             for chat in chats:
-                if not chat.template:
+                campaign = get_effective_campaign_for_chat(session, chat.id)
+                effective_template = campaign.template if campaign and campaign.template else chat.template
+                effective_interval = campaign.interval_minutes if campaign else chat.cooldown_minutes
+
+                if not effective_template:
                     logger.debug(f"Chat {chat.id} has no assigned template, skipping")
                     chats_skipped += 1
                     continue
@@ -89,11 +94,25 @@ class SchedulerService:
                     continue
 
                 now = datetime.utcnow()
-                last_sent = chat.last_sent_at or (now - timedelta(minutes=chat.cooldown_minutes + 1))
+                last_sent = chat.last_sent_at or (now - timedelta(minutes=effective_interval + 1))
                 time_since_send = now - last_sent
 
-                if time_since_send >= timedelta(minutes=chat.cooldown_minutes):
-                    result_tuple = await self._send_to_chat(session, chat)
+                first_send_due = bool(
+                    campaign
+                    and campaign.first_send_at
+                    and now >= campaign.first_send_at
+                )
+
+                if first_send_due or time_since_send >= timedelta(minutes=effective_interval):
+                    if campaign:
+                        mark_campaign_first_send_consumed(session, campaign)
+                    result_tuple = await self._send_to_chat(
+                        session,
+                        chat,
+                        template=effective_template,
+                        interval_minutes=effective_interval,
+                        ignore_cooldown=first_send_due,
+                    )
                     if result_tuple:
                         success, skipped, error = result_tuple
                         if success:
@@ -115,7 +134,14 @@ class SchedulerService:
                 f"sent={chats_sent}, skipped={chats_skipped}, errors={chats_errors}"
             )
 
-    async def _send_to_chat(self, session, chat: Chat):
+    async def _send_to_chat(
+        self,
+        session,
+        chat: Chat,
+        template=None,
+        interval_minutes: int | None = None,
+        ignore_cooldown: bool = False,
+    ):
         """
         Send message to a specific chat using the abstracted sender.
 
@@ -123,11 +149,19 @@ class SchedulerService:
         Returns (success, skipped, error) tuple for accounting.
         """
         try:
-            if not chat.account or not chat.template:
+            effective_template = template or chat.template
+            if not chat.account or not effective_template:
                 logger.warning(f"Chat {chat.id} missing account or template, skipping")
                 return (False, True, False)
 
-            result = await send_message(session, chat.account, chat, chat.template)
+            result = await send_message(
+                session,
+                chat.account,
+                chat,
+                effective_template,
+                interval_minutes=interval_minutes,
+                ignore_cooldown=ignore_cooldown,
+            )
 
             # Scheduler owns the session and commits after send_message
             session.commit()

@@ -34,6 +34,7 @@ async def run_bot(settings: Settings) -> None:
         accounts,
         account_lifecycle_router,
         accounts_router,
+        campaigns_router,
         chats_router,
         dashboard,
         dashboard_router,
@@ -71,6 +72,7 @@ async def run_bot(settings: Settings) -> None:
         dispatcher.include_router(templates_router)
         dispatcher.include_router(chats_router)
         dispatcher.include_router(dashboard_router)
+        dispatcher.include_router(campaigns_router)
         dispatcher.include_router(logs_router)
         dispatcher.include_router(telethon_auth_router)
         dispatcher.include_router(proxy_router)

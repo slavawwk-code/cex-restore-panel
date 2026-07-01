@@ -68,6 +68,9 @@ def get_account_settings_keyboard(
         buttons.append(
             [InlineKeyboardButton(text="Отключить Telegram", callback_data=f"auth_disconnect_{account_id}")]
         )
+    buttons.append(
+        [InlineKeyboardButton(text="Тестовая отправка сейчас", callback_data=f"account_campaign_test_{account_id}")]
+    )
     if status != "disabled":
         buttons.append(
             [InlineKeyboardButton(text="Отключить аккаунт", callback_data=f"account_disable_{account_id}")]
