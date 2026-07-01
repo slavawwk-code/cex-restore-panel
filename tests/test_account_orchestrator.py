@@ -16,6 +16,7 @@ from app.services.account_orchestrator import (
     _LoginJob,
 )
 from app.services.proxy import ParsedProxy, ProxyTestResult
+from app.services.proxy import ProxyDetectionResult
 
 
 class FakeClientManager:
@@ -329,6 +330,46 @@ class OrchestratorConcurrencyTests(unittest.IsolatedAsyncioTestCase):
 
         await orchestrator.stop()
         self.assertIn("AUTH FLOW IN PROGRESS", str(caught.exception))
+
+    async def test_successful_proxy_detection_assigns_endpoint_without_crash(self):
+        orchestrator = self._orchestrator()
+        proxy_config = ParsedProxy(
+            proxy_type=None,
+            host="127.0.0.1",
+            port=1080,
+            username="user",
+            password="secret",
+            candidate_types=("SOCKS5", "HTTP", "SOCKS4"),
+        )
+        detection = ProxyDetectionResult(
+            success=True,
+            detected_type="HTTP",
+            attempts=(
+                ProxyTestResult("SOCKS5", False, "timeout"),
+                ProxyTestResult("HTTP", True, latency_ms=123),
+            ),
+        )
+
+        with patch(
+            "app.services.account_orchestrator.detect_working_proxy_type",
+            new=AsyncMock(return_value=detection),
+        ):
+            result = await orchestrator.assign_proxy(
+                1,
+                proxy_config=proxy_config,
+                validate=True,
+            )
+
+        await orchestrator.stop()
+        session = self.session_factory()
+        try:
+            account = session.get(AdvertisingAccount, 1)
+            self.assertIs(result, detection)
+            self.assertEqual(account.proxy_type, "HTTP")
+            self.assertEqual(account.proxy_status, "working")
+            self.assertIsNotNone(account.proxy_id)
+        finally:
+            session.close()
 
     async def test_auth_context_ttl_expiry_resets_account_state(self):
         orchestrator = self._orchestrator()

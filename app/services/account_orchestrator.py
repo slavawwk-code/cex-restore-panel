@@ -1572,8 +1572,12 @@ class AccountOrchestrator:
         endpoint.last_error = None if success else (
             detection.attempts[-1].error if detection.attempts else "Проверка не выполнена"
         )
-        if detection.working_type:
-            endpoint.proxy_type = detection.working_type
+        detected_type = AccountOrchestrator._get_detected_proxy_type(
+            detection,
+            endpoint.proxy_type,
+        )
+        if detected_type:
+            endpoint.proxy_type = detected_type
         if detection.success:
             endpoint.enabled = True
             endpoint.disabled_until = None
@@ -1588,7 +1592,7 @@ class AccountOrchestrator:
         config: ParsedProxy,
         detection: ProxyDetectionResult | None,
     ) -> ProxyEndpoint:
-        proxy_type = detection.working_type if detection and detection.success else config.proxy_type
+        proxy_type = self._get_detected_proxy_type(detection, config.proxy_type)
         endpoint = (
             session.query(ProxyEndpoint)
             .filter(
@@ -1613,6 +1617,26 @@ class AccountOrchestrator:
         if detection:
             self._update_endpoint(endpoint, detection)
         return endpoint
+
+    @staticmethod
+    def _get_detected_proxy_type(
+        detection: ProxyDetectionResult | None,
+        fallback: str | None,
+    ) -> str | None:
+        """Resolve the successful proxy type across compatible result shapes."""
+        if not detection or not detection.success:
+            return fallback
+        detected_type = getattr(detection, "detected_type", None)
+        if detected_type:
+            return detected_type
+        working_type = getattr(detection, "working_type", None)
+        if working_type:
+            return working_type
+        success_attempt = next(
+            (attempt for attempt in getattr(detection, "attempts", ()) if attempt.success),
+            None,
+        )
+        return success_attempt.proxy_type if success_attempt else fallback
 
     @staticmethod
     def _sync_endpoint_from_account(session, account: AdvertisingAccount) -> None:
